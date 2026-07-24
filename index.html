@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<!-- 多層防御(第零条実践規範§7-4): 出口封鎖CSP。Hissuru と同一（GAS も accounts/googleusercontent も同ホスト）。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' https://accounts.google.com https://apis.google.com; script-src 'self' 'unsafe-inline' https://accounts.google.com https://apis.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://www.googleapis.com https://accounts.google.com; frame-src https://accounts.google.com; object-src 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>部門損益 可視化</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root{ --border:#e2e8f0; --muted:#64748b; --fg:#0f172a; --sky50:#f0f9ff; --sky100:#e0f2fe; --sky700:#0369a1; --sky800:#075985; --amber:#b45309;
+         /* オリジナル(DeptProfitVis charts.py)準拠の配色 */
+         --sales:#1f77b4; --gp:#ff7f0e; --rate:#d62728; --salesL:#a6c8e0; --gpL:#ffcc80; --rateL:#e57373;
+         --waste:#d62728; --discount:#C71585; --loss:#FFAB00; }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:"Segoe UI","Hiragino Sans","Yu Gothic UI",sans-serif;color:var(--fg);background:#fff;}
+  header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#fff;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:40;}
+  header .logo{background:#f39800;color:#fff;font-weight:700;font-size:12px;border-radius:6px;padding:5px 7px;}
+  header h1{font-size:15px;margin:0;} header .sub{font-size:11px;color:var(--muted);font-weight:400;}
+  header .user{margin-left:auto;font-size:11px;color:var(--muted);}
+  header .ghelp{margin-left:10px;padding:4px 10px;font-size:12px;white-space:nowrap;border:1px solid var(--sky700);border-radius:8px;color:var(--sky800);background:var(--sky50);font-weight:600;cursor:pointer;}
+  .page{min-height:calc(100vh - 55px);}
+  main{max-width:1160px;margin:0 auto;padding:18px 16px 40px;}
+  h2.title{font-size:20px;font-weight:600;margin:0;} .subtitle{font-size:13px;color:var(--muted);margin:2px 0 0;}
+  .btn{border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font-size:13px;padding:6px 12px;color:#334155;}
+  .btn.primary{background:#f39800;border-color:#f39800;color:#fff;font-weight:600;}
+  select{font-size:13px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;}
+  .lb{font-size:11px;color:var(--muted);}
+  .note{color:var(--muted);font-size:13px;padding:14px;}
+  .err{color:#b91c1c;font-size:13px;padding:14px;border:1px solid #fecaca;border-radius:10px;background:#fef2f2;white-space:pre-wrap;}
+  .card{border:1px solid var(--border);border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.04);padding:22px;max-width:520px;margin:6vh auto 0;text-align:center;}
+  .card .cico{font-size:30px;} .card h3{margin:8px 0 4px;font-size:17px;} .card p{color:var(--muted);font-size:13px;margin:6px 0 16px;}
+  .roadmap{border:1px solid var(--sky100);background:var(--sky50);border-radius:12px;padding:14px 18px;margin-top:16px;text-align:left;}
+  .roadmap b{color:var(--sky800);} .roadmap ul{margin:8px 0 0 18px;padding:0;} .roadmap li{font-size:13px;line-height:1.8;color:#334155;}
+  .badge{display:inline-block;background:#fffbeb;border:1px solid #fde68a;color:var(--amber);font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px;}
+  .selbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:10px 0 6px;}
+  .modeseg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+  .modeseg button{border:none;background:#fff;padding:6px 12px;font-size:13px;cursor:pointer;color:#334155;}
+  .modeseg button.on{background:#f39800;color:#fff;font-weight:600;}
+  .chartcard{border:1px solid var(--border);border-radius:12px;background:#fff;padding:12px 14px;margin-top:8px;}
+  .chartcard .chead{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;}
+  .chartcard .chead b{font-size:14px;} .chartcard .chead .lb{font-size:11px;}
+  .scopechips{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 0;}
+  .chip{font-size:11px;border-radius:999px;padding:2px 9px;background:#eef2f7;color:#475569;}
+  .chip.a{background:#e0f2fe;color:#075985;} .chip.s{background:#dcfce7;color:#166534;} .chip.d{background:#ede9fe;color:#5b21b6;}
+  svg text{font-family:"Segoe UI","Hiragino Sans",sans-serif;}
+  .admin-btn{border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font-weight:700;border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;}
+  #busyOverlay{position:fixed;inset:0;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;z-index:200;}
+  #busyOverlay .bcard{background:#fff;border-radius:14px;padding:18px 24px;box-shadow:0 10px 30px rgba(0,0,0,.2);text-align:center;min-width:240px;}
+  #busyOverlay .bttl{font-weight:700;font-size:14px;margin-top:10px;color:#0f172a;} #busyOverlay .bsub{font-size:12px;color:var(--muted);margin-top:4px;}
+  .spin{display:inline-block;width:22px;height:22px;border:3px solid #e2e8f0;border-top-color:#f39800;border-radius:50%;animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .dmcard{max-width:760px;margin:12px auto;border:1px solid var(--border);border-radius:12px;padding:18px 20px;}
+  .dmzone{border:1.5px dashed var(--border);border-radius:10px;padding:14px;margin:12px 0;background:#fafafa;}
+  .dmzone h4{margin:0 0 4px;font-size:14px;} .dmzone .hint{font-size:12px;color:var(--muted);margin:0 0 8px;}
+  .uplist{margin-top:8px;} .uprow{font-size:12px;padding:3px 0;color:#334155;display:flex;gap:6px;align-items:center;}
+  .uprow .st{width:18px;text-align:center;} .uprow .x{margin-left:auto;cursor:pointer;color:#94a3b8;}
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">AC</span>
+  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-24d</span></h1></div>
+  <span class="user" id="user"></span>
+  <button class="btn ghelp" onclick="openGuide()" title="このシステムの使い方（準備中）">📖 ご利用ガイド</button>
+</header>
+<div class="page" id="page">
+<main id="app"><div class="note">読み込み中…</div></main>
+</div>
+
+<script>
+"use strict";
+/* 部門損益 可視化（soneki）。ヒッスル(PDCA)は別の第3システム（混同禁止）。
+   構成: 画面=GitHub Pages ／ データ=GAS API（毎回トークン検証）。Hissuru の型を流用。 */
+const IS_LOCAL = (location.hostname==="localhost"||location.hostname==="127.0.0.1"||location.protocol==="file:");
+const IS_GAS = !IS_LOCAL;
+const CONFIG = {
+  GAS_URL: "__SONEKI_GAS_EXEC_URL__",   // soneki-gas デプロイ後に /exec URL へ差し替え
+  GOOGLE_CLIENT_ID: "1072945615483-74jadmaet56chvhkfh2cpt4ae9dvh140.apps.googleusercontent.com", // Hissuru と共用（同一オリジン）
+  ALLOWED_DOMAINS: ["jaz-acoop.co.jp","jaz-acoop1.jp","jaz-acoop2.jp","jaz-acoop3.jp"]
+};
+const GAS_READY = IS_GAS && CONFIG.GAS_URL.indexOf("http")===0;
+
+/* ── OAuth2 認証（Hissuru/スマレコ方式） ── */
+let currentAccessToken=null, accessTokenExpiry=0, oauthTokenClient=null, tokenRefreshTimer=null, authedEmail="";
+const TOKEN_STORE_KEY = "soneki_oauth_token_v1";
+function persistAccessToken_(){ try{ if(currentAccessToken&&accessTokenExpiry) localStorage.setItem(TOKEN_STORE_KEY, JSON.stringify({t:currentAccessToken,e:accessTokenExpiry})); }catch(e){} }
+function restoreAccessToken_(){ try{ const raw=localStorage.getItem(TOKEN_STORE_KEY); if(!raw) return false; const o=JSON.parse(raw); if(!o||!o.t||!o.e||Date.now()>o.e-60000) return false; currentAccessToken=o.t; accessTokenExpiry=o.e; scheduleAccessTokenRefresh_(Math.floor((o.e-Date.now())/1000)+30); return true; }catch(e){ return false; } }
+function clearStoredToken_(){ try{ localStorage.removeItem(TOKEN_STORE_KEY); }catch(e){} }
+function ensureOAuthTokenClient_(){
+  if(oauthTokenClient) return;
+  if(!(window.google && google.accounts && google.accounts.oauth2)) throw new Error("Googleログイン部品が読み込めていません。ページを再読み込みしてください");
+  oauthTokenClient = google.accounts.oauth2.initTokenClient({ client_id: CONFIG.GOOGLE_CLIENT_ID, scope: "openid email profile", callback: ()=>{} });
+}
+function requestAccessTokenOnce_(opts){
+  return new Promise((resolve,reject)=>{
+    try{ ensureOAuthTokenClient_(); }catch(e){ return reject(e); }
+    const silent = !!(opts && opts.silent);
+    let settled=false, guard=null;
+    if(silent) guard=setTimeout(()=>{ if(!settled){ settled=true; reject(new Error("silent token timeout")); } }, 10000);
+    oauthTokenClient.callback = (resp)=>{
+      if(settled) return; settled=true; if(guard) clearTimeout(guard);
+      if(!resp || resp.error || !resp.access_token) return reject(new Error((resp&&(resp.error_description||resp.error))||"トークン取得失敗"));
+      currentAccessToken = resp.access_token;
+      const ei = Number(resp.expires_in)||3600;
+      accessTokenExpiry = Date.now() + (ei-30)*1000;
+      persistAccessToken_(); scheduleAccessTokenRefresh_(ei);
+      resolve(resp);
+    };
+    try{ const req={}; if(silent) req.prompt=""; oauthTokenClient.requestAccessToken(req); }
+    catch(e){ if(!settled){ settled=true; if(guard) clearTimeout(guard); reject(e); } }
+  });
+}
+function scheduleAccessTokenRefresh_(expiresInSec){
+  if(tokenRefreshTimer) clearTimeout(tokenRefreshTimer);
+  const after = Math.min(Math.max((expiresInSec-300)*1000, 5000), 55*60*1000);
+  tokenRefreshTimer = setTimeout(()=>{ requestAccessTokenOnce_({silent:true}).catch(()=>{}); }, after);
+}
+async function fetchUserInfo_(){
+  if(!currentAccessToken) throw new Error("未ログイン");
+  const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers:{ Authorization: "Bearer "+currentAccessToken } });
+  if(!res.ok) throw new Error("userinfo HTTP "+res.status);
+  return res.json();
+}
+async function gsCall(fn, ...args){
+  if(!GAS_READY) throw new Error("GAS_URL 未設定");
+  const noToken = !currentAccessToken, near = accessTokenExpiry && Date.now() > accessTokenExpiry - 60000;
+  if(noToken || near){ try{ await requestAccessTokenOnce_({silent:true}); }catch(e){} }
+  if(!currentAccessToken){ renderLogin_("セッションの有効期限が切れました。再度ログインしてください。"); throw new Error("セッション切れです"); }
+  const res = await fetch(CONFIG.GAS_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=UTF-8" }, body: JSON.stringify({ action:fn, args:args, accessToken: currentAccessToken }), redirect:"follow" });
+  if(!res.ok) throw new Error("HTTP "+res.status);
+  const json = await res.json();
+  if(json && json.error){ if(String(json.error).indexOf("認証失敗")>=0){ currentAccessToken=null; accessTokenExpiry=0; clearStoredToken_(); } throw new Error(json.error); }
+  return json.result;
+}
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/* ── データ取得: デモ=同梱demo/ ／ 本番=GAS getJson ／ ローカル=outbox_mirror ── */
+let DEMO=false;
+async function loadJson(name){
+  if(DEMO){ const r=await fetch("demo/"+name); if(!r.ok) throw new Error("未収載: "+name); return r.json(); }
+  if(IS_GAS) return JSON.parse(await gsCall("getJson", name));
+  const r=await fetch("../outbox_mirror/"+name); if(!r.ok) throw new Error("未収載: "+name); return r.json();
+}
+async function startDemo_(){ DEMO=true; S.isAdmin=false; $("user").textContent="デモ表示（サンプルデータ）"; await startApp_(); }
+
+/* ── 状態 ── */
+const S={ meta:null, area:"", scope:"AREA", dept:"ALL", mode:"通常", series:null, isAdmin:false, upQ:[] };
+const aslug_=a=>{ const x=(S.meta.areas||[]).find(o=>o.name===a); return x?x.slug:a; };
+const dslug_=d=>{ if(d==="ALL")return "ALL"; const x=(S.meta.depts||[]).find(o=>o.name===d); return x?x.slug:d; };
+
+/* ── 画面: ログイン ── */
+function renderLogin_(msg){
+  $("user").textContent="";
+  $("app").innerHTML=
+    `<div class="card"><div class="cico">🔐</div><h3>会社アカウントでログイン</h3>`+
+    `<p>会社の Google アカウント（jaz-acoop.co.jp ／ jaz-acoop1.jp ／ jaz-acoop2.jp ／ jaz-acoop3.jp）でログインしてください。個人の Gmail では開けません。</p>`+
+    (msg?`<p class="err" style="text-align:left">${esc(msg)}</p>`:"")+
+    `<button class="btn primary" style="padding:9px 18px" onclick="login_()">Google でログイン</button></div>`;
+}
+async function login_(){ try{ await requestAccessTokenOnce_({}); await afterAuth_(); }catch(e){ renderLogin_("ログインに失敗しました：" + (e&&e.message||e)); } }
+function logout_(){ currentAccessToken=null; accessTokenExpiry=0; authedEmail=""; clearStoredToken_(); renderLogin_(); }
+async function afterAuth_(){
+  try{
+    const info = await fetchUserInfo_();
+    authedEmail = String(info.email||"").toLowerCase();
+    if(CONFIG.ALLOWED_DOMAINS.indexOf(authedEmail.split("@")[1]||"")<0){ logout_(); renderLogin_("会社アカウント（4ドメイン）でログインし直してください。"); return; }
+    $("user").innerHTML = `${esc(authedEmail)} <button class="btn" style="padding:2px 8px;font-size:11px;margin-left:6px" onclick="logout_()">ログアウト</button>`;
+  }catch(e){ renderLogin_("ユーザー情報の取得に失敗しました。再度ログインしてください。"); return; }
+  try{ const w=await gsCall("whoami"); S.isAdmin=!!(w&&w.isAdmin); }catch(e){ S.isAdmin=false; }
+  await startApp_();
+}
+
+/* ── アプリ本体 ── */
+async function startApp_(){
+  try{ S.meta = await loadJson("meta.json"); }
+  catch(e){ $("app").innerHTML=`<div class="err">データ（meta.json）を取得できません：${esc(String(e&&e.message||e))}</div>`; return; }
+  S.area = (S.meta.areas[0]||{}).name || "";
+  renderApp_(); await loadAndRender_();
+}
+function storesOfArea_(area){ return (S.meta.stores||[]).filter(s=>s.area===area); }
+function renderApp_(){
+  const areaSel=`<select id="fArea" onchange="onArea(this.value)">`+S.meta.areas.map(a=>`<option value="${esc(a.name)}" ${a.name===S.area?"selected":""}>${esc(a.name)}</option>`).join("")+`</select>`;
+  const sts=storesOfArea_(S.area);
+  const storeSel=`<select id="fScope" onchange="onScope(this.value)"><option value="AREA" ${S.scope==="AREA"?"selected":""}>エリア合計</option>`+
+    sts.map(s=>`<option value="${esc(s.slug)}" ${s.slug===S.scope?"selected":""}>${esc(s.store_name)}</option>`).join("")+`</select>`;
+  const deptSel=`<select id="fDept" onchange="onDept(this.value)"><option value="ALL" ${S.dept==="ALL"?"selected":""}>合計（全部門）</option>`+
+    S.meta.depts.map(d=>`<option value="${esc(d.name)}" ${d.name===S.dept?"selected":""}>${esc(d.name)}</option>`).join("")+`</select>`;
+  const modeSeg=`<span class="modeseg">`+["通常","前年対比"].map(m=>`<button class="${S.mode===m?'on':''}" onclick="onMode('${m}')">${m}</button>`).join("")+`</span>`;
+  $("app").innerHTML=
+    (DEMO?`<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 12px;font-size:12.5px;margin-bottom:8px">🧪 これは<b>サンプルデータのデモ表示</b>です（実データではありません）。色・見せ方の確認用。実データは本部取込後に表示されます。</div>`:"")+
+    `<div style="margin-bottom:4px"><h2 class="title">部門損益 可視化</h2><p class="subtitle">部門別の売上・粗利・粗利率を月次トレンドで確認（v1）</p></div>`+
+    `<div class="selbar"><span class="lb">エリア</span>${areaSel}<span class="lb">店舗</span>${storeSel}<span class="lb">部門</span>${deptSel}`+
+    `<span class="lb" style="margin-left:12px">表示</span>${modeSeg}`+
+    (S.isAdmin?`<button class="admin-btn" style="margin-left:auto" onclick="renderDataManage_()" title="Excelの取込（管理者向け）">⚙️ データ管理</button>`:`<span style="margin-left:auto"></span>`)+
+    `</div>`+
+    `<div id="scopechips" class="scopechips"></div>`+
+    `<div id="chartwrap"><div class="note">読み込み中…</div></div>`;
+}
+function onArea(v){ S.area=v; const sts=storesOfArea_(v); if(S.scope!=="AREA"&&!sts.some(s=>s.slug===S.scope)) S.scope="AREA"; renderApp_(); loadAndRender_(); }
+function onScope(v){ S.scope=v; loadAndRender_(); }
+function onDept(v){ S.dept=v; loadAndRender_(); }
+function onMode(v){ S.mode=v; renderApp_(); renderChart_(); }
+
+async function loadAndRender_(){
+  const w=$("chartwrap"); if(w) w.innerHTML=`<div class="note">読み込み中…</div>`;
+  const fname=`series/${aslug_(S.area)}__${dslug_(S.dept)}__${S.scope}.json`;
+  try{ S.series = await loadJson(fname); }
+  catch(e){ if(w) w.innerHTML=`<div class="note">この範囲のデータがありません（${esc(fname)}）。</div>`; return; }
+  renderChart_();
+}
+
+/* ── スコープチップ ── */
+function scopeLabel_(){
+  const st=(S.scope==="AREA")?"エリア合計":((storesOfArea_(S.area).find(s=>s.slug===S.scope)||{}).store_name||S.scope);
+  return { area:S.area, store:st, dept:(S.dept==="ALL"?"合計（全部門）":S.dept) };
+}
+function renderScopeChips_(){
+  const c=$("scopechips"); if(!c) return; const l=scopeLabel_();
+  c.innerHTML=`<span class="chip a">${esc(l.area)}</span><span class="chip s">${esc(l.store)}</span><span class="chip d">${esc(l.dept)}</span>`+
+    (S.meta.generated_at?`<span class="chip">データ更新: ${esc(S.meta.generated_at)}</span>`:"");
+}
+
+/* ── v1 チャート（自前SVG: 売上・粗利=棒／粗利率=折線／前年ゴースト） ── */
+function fmtK(v){ return Math.round(v).toLocaleString(); }
+function niceMax(v){ if(v<=0)return 1; const e=Math.pow(10,Math.floor(Math.log10(v))); const f=v/e; const n=f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10; return n*e; }
+function prevYm_(ym){ return (parseInt(ym.slice(0,4),10)-1)+ym.slice(4); }
+function renderChart_(){
+  const w=$("chartwrap"); if(!w||!S.series) return;
+  renderScopeChips_();
+  const all=S.series.months||[];
+  if(!all.length){ w.innerHTML=`<div class="note">データがありません。</div>`; return; }
+  const yoy=(S.mode==="前年対比");
+  const byYm={}; all.forEach(r=>byYm[r.ym]=r);
+  // 通常＝最新から24ヶ月／前年対比＝前年同月データがある月だけを最新から最大12ヶ月（＝同月対比）
+  const disp = yoy ? all.filter(r=>byYm[prevYm_(r.ym)]).slice(-12)
+                   : all.slice(-Math.min(S.meta.display_months||24, all.length));
+  const dispN=disp.length;
+  const rows=disp.map(r=>({ ...r, prev: byYm[prevYm_(r.ym)]||null }));
+  if(yoy && !dispN){ w.innerHTML=`<div class="note">前年対比に必要な前年同月データがありません（このデモの実データは直近15ヶ月のみ）。</div>`; return; }
+  const card=(title,sub,svg)=>`<div class="chartcard"><div class="chead"><b>${title}</b><span class="lb">${sub}</span></div>${svg}</div>`;
+  w.innerHTML=
+    (yoy?card("累計（年度）", `年度開始4月からの累計（実線=当年・破線=前年）`, svgYTD_(all)):"")+
+    card("① 売上・粗利・粗利率", `直近${dispN}ヶ月${yoy?"／前年対比（灰=前年・濃=前年超/淡=前年割れ）":""}・金額=千円`, svgSalesMargin_(rows,yoy))+
+    card("② ロス管理（廃棄・値引）", `積み上げ棒＝金額／折線＝率（右軸）`, svgLoss_(rows))+
+    card("③ 経費構造推移（販管費内訳）", `積み上げ棒・金額=千円`, svgCostBreakdown_(rows))+
+    card("④ 利益構造", `${S.dept==="ALL"?"営業利益（黒字=橙・赤字=青）":"貢献利益（配賦前 vs 配賦後・横並び）"}`, svgProfit_(rows,S.dept))+
+    card("⑤ 労働生産性", `人時売上（青）・人時生産性（緑）・円/人時`, svgProductivity_(rows));
+}
+function chartBase_(rows, o){
+  const W=1000,H=430,mL=68,mR=(o.maxRight!=null?62:24),mT=10,mB=58;
+  const x0=mL,x1=W-mR,y0=mT,y1=H-mB,pw=x1-x0,ph=y1-y0,n=rows.length,bw=pw/n;
+  const maxL=niceMax(o.maxLeft||1), maxR=(o.maxRight!=null)?niceMax(o.maxRight||0.1):null;
+  const yL=v=>y1-(v/maxL)*ph, yR=v=>maxR?y1-(v/maxR)*ph:0, cx=i=>x0+bw*(i+0.5);
+  let g=""; const T=4;
+  for(let t=0;t<=T;t++){ const y=yL(maxL*t/T);
+    g+=`<line x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}" stroke="#eef2f7"/>`;
+    g+=`<text x="${x0-6}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="10" fill="#94a3b8">${fmtK(maxL*t/T)}</text>`;
+    if(maxR!=null) g+=`<text x="${x1+6}" y="${(yR(maxR*t/T)+3).toFixed(1)}" text-anchor="start" font-size="10" fill="#94a3b8">${o.rightPct?(maxR*t/T*100).toFixed(1)+"%":fmtK(maxR*t/T)}</text>`;
+  }
+  const midY=(y0+ph/2).toFixed(1);
+  g+=`<text x="16" y="${midY}" transform="rotate(-90 16 ${midY})" text-anchor="middle" font-size="11" fill="#64748b">${esc(o.leftTitle||"金額(千円)")}</text>`;
+  if(o.rightTitle) g+=`<text x="${W-14}" y="${midY}" transform="rotate(90 ${W-14} ${midY})" text-anchor="middle" font-size="11" fill="#64748b">${esc(o.rightTitle)}</text>`;
+  rows.forEach((r,i)=>{ if(i%2===0||i===n-1){ const c=cx(i), lab=`${r.ym.slice(2,4)}/${r.ym.slice(4)}`;
+    g+=`<text x="${c.toFixed(1)}" y="${(y1+13).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b" transform="rotate(-60 ${c.toFixed(1)} ${(y1+13).toFixed(1)})">${lab}</text>`; }});
+  g+=`<line x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}" stroke="#cbd5e1"/>`;
+  return {frame:g, yL, yR, cx, x0, x1, y1, bw, W, H, n};
+}
+function legendSvg_(items, x0, W){ let lx=x0,lg=""; items.forEach(a=>{ lg+=`<rect x="${lx}" y="0" width="11" height="11" rx="2" fill="${a[0]}"/><text x="${lx+15}" y="9.5" font-size="11" fill="#334155">${a[1]}</text>`; lx+=15+a[1].length*13+16; }); return `<svg viewBox="0 0 ${W} 14" style="width:100%;height:16px" role="img">${lg}</svg>`; }
+function svgWrap_(b, body){ return `<svg viewBox="0 0 ${b.W} ${b.H}" style="width:100%;height:auto" role="img">${b.frame}${body}</svg>`; }
+
+function svgSalesMargin_(rows, yoy){
+  const C={sales:"#1f77b4",gp:"#ff7f0e",rate:"#d62728",g1:"#d9d9d9",g2:"#b0b0b0",rateP:"#999999"};
+  let maxAmt=0,maxRate=0;
+  rows.forEach(r=>{ maxAmt=Math.max(maxAmt,r.sales,(yoy&&r.prev)?r.prev.sales:0); maxRate=Math.max(maxRate,r.gross_profit_rate,(yoy&&r.prev)?r.prev.gross_profit_rate:0); });
+  const b=chartBase_(rows,{maxLeft:maxAmt,maxRight:maxRate*1.08,rightPct:true,leftTitle:"金額(千円)",rightTitle:"粗利率"});
+  let g=""; const bw=b.bw;
+  const rect=(x,w,val,fill,op,tip)=>`<rect x="${x.toFixed(1)}" y="${b.yL(val).toFixed(1)}" width="${w.toFixed(1)}" height="${(b.y1-b.yL(val)).toFixed(1)}" fill="${fill}" opacity="${op}"><title>${tip}</title></rect>`;
+  rows.forEach((r,i)=>{ const c=b.cx(i);
+    if(yoy&&r.prev){
+      const gw=Math.max(4,bw*0.62), cw=Math.max(3,bw*0.44), gx=c-gw/2, cx2=c-cw/2;
+      g+=rect(gx,gw,r.prev.sales,C.g1,0.85,`前年 売上 ${fmtK(r.prev.sales)}`);
+      g+=rect(gx,gw,r.prev.gross_profit,C.g2,0.85,`前年 粗利 ${fmtK(r.prev.gross_profit)}`);
+      g+=rect(cx2,cw,r.sales,C.sales,(r.sales>=r.prev.sales?1:0.4),`${r.ym} 売上 ${fmtK(r.sales)}千円`);
+      g+=rect(cx2,cw,r.gross_profit,C.gp,(r.gross_profit>=r.prev.gross_profit?1:0.4),`${r.ym} 粗利 ${fmtK(r.gross_profit)}千円`);
+    } else {
+      const w=Math.max(4,bw*0.62), x=c-w/2;
+      g+=rect(x,w,r.sales,C.sales,0.85,`${r.ym} 売上 ${fmtK(r.sales)}千円`);
+      g+=rect(x,w,r.gross_profit,C.gp,0.85,`${r.ym} 粗利 ${fmtK(r.gross_profit)}千円`);
+    }
+  });
+  const pts=rows.map((r,i)=>`${b.cx(i).toFixed(1)},${b.yR(r.gross_profit_rate).toFixed(1)}`).join(" ");
+  g+=`<polyline points="${pts}" fill="none" stroke="${C.rate}" stroke-width="2.5"/>`;
+  rows.forEach((r,i)=>{ g+=`<circle cx="${b.cx(i).toFixed(1)}" cy="${b.yR(r.gross_profit_rate).toFixed(1)}" r="3" fill="${C.rate}"><title>${r.ym} 粗利率 ${(r.gross_profit_rate*100).toFixed(1)}%</title></circle>`; });
+  if(yoy){ const pp=rows.map((r,i)=>r.prev?`${b.cx(i).toFixed(1)},${b.yR(r.prev.gross_profit_rate).toFixed(1)}`:null).filter(Boolean).join(" ");
+    g+=`<polyline points="${pp}" fill="none" stroke="${C.rateP}" stroke-width="1.6" stroke-dasharray="4 3"/>`; }
+  const leg=[[C.sales,"売上"],[C.gp,"粗利"],[C.rate,"粗利率(右軸)"]].concat(yoy?[[C.g2,"前年(灰)"]]:[]);
+  return legendSvg_(leg,b.x0,b.W)+svgWrap_(b,g);
+}
+function svgLoss_(rows){
+  const C={waste:"#d62728",disc:"#C71585",loss:"#FFAB00"};
+  let maxAmt=0,maxRate=0;
+  rows.forEach(r=>{ maxAmt=Math.max(maxAmt,(r.waste_amount||0)+(r.discount_amount||0)); maxRate=Math.max(maxRate,(r.waste_rate||0)+(r.discount_rate||0)); });
+  const b=chartBase_(rows,{maxLeft:maxAmt,maxRight:maxRate*1.12,rightPct:true,leftTitle:"金額(千円)",rightTitle:"率"});
+  let g=""; const w=Math.max(4,b.bw*0.6);
+  rows.forEach((r,i)=>{ const x=b.cx(i)-w/2, wa=r.waste_amount||0, di=r.discount_amount||0, yW=b.yL(wa), yD=b.yL(wa+di);
+    g+=`<rect x="${x.toFixed(1)}" y="${yW.toFixed(1)}" width="${w.toFixed(1)}" height="${(b.y1-yW).toFixed(1)}" fill="${C.waste}" opacity="0.85"><title>${r.ym} 廃棄額 ${fmtK(wa)}</title></rect>`;
+    g+=`<rect x="${x.toFixed(1)}" y="${yD.toFixed(1)}" width="${w.toFixed(1)}" height="${(yW-yD).toFixed(1)}" fill="${C.disc}" opacity="0.85"><title>${r.ym} 値引額 ${fmtK(di)}</title></rect>`;
+  });
+  const line=(fn,col)=>{ const pts=rows.map((r,i)=>`${b.cx(i).toFixed(1)},${b.yR(fn(r)).toFixed(1)}`).join(" "); let s=`<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" opacity="0.85"/>`; rows.forEach((r,i)=>{ s+=`<circle cx="${b.cx(i).toFixed(1)}" cy="${b.yR(fn(r)).toFixed(1)}" r="2.5" fill="${col}"/>`; }); return s; };
+  g+=line(r=>r.waste_rate||0,C.waste)+line(r=>r.discount_rate||0,C.disc)+line(r=>(r.waste_rate||0)+(r.discount_rate||0),C.loss);
+  return legendSvg_([[C.waste,"廃棄"],[C.disc,"値引"],[C.loss,"ロス率(計)"]],b.x0,b.W)+svgWrap_(b,g);
+}
+function svgCostBreakdown_(rows){
+  const comps=[["sga_personnel","人件費","#1f77b4"],["sga_selling","販売費","#ff7f0e"],["sga_admin_a","管理費A","#bcbd22"],["sga_admin_b","管理費B","#2ca02c"],["sga_depreciation","減価償却費","#9467bd"]];
+  // 実データは減価償却費等に負値（戻し/調整）が入り得る。altair同様、正の費用は0から上・負の調整は0から下へ積む（符号付き軸）
+  let posMax=0, negMin=0;
+  rows.forEach(r=>{ let p=0,n=0; comps.forEach(c=>{ const v=r[c[0]]||0; if(v>=0)p+=v; else n+=v; }); posMax=Math.max(posMax,p); negMin=Math.min(negMin,n); });
+  const W=1000,H=430,mL=68,mR=24,mT=10,mB=58,x0=mL,x1=W-mR,y0=mT,y1=H-mB,ph=y1-y0,n=rows.length,bw=(x1-x0)/n;
+  const mx=posMax>0?niceMax(posMax):1, mn=negMin<0?-niceMax(-negMin):0;
+  const yL=v=>y1-((v-mn)/(mx-mn))*ph, cx=i=>x0+bw*(i+0.5), yz=yL(0);
+  let g=""; const T=4;
+  for(let t=0;t<=T;t++){ const val=mn+(mx-mn)*t/T,y=yL(val); g+=`<line x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}" stroke="${Math.abs(val)<1e-9?'#cbd5e1':'#eef2f7'}"/><text x="${x0-6}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="10" fill="#94a3b8">${fmtK(val)}</text>`; }
+  const w=Math.max(4,bw*0.6);
+  rows.forEach((r,i)=>{ const x=cx(i)-w/2; let accP=0, accN=0;
+    comps.forEach(cp=>{ const v=r[cp[0]]||0; if(!v) return;
+      let top,h;
+      if(v>0){ const yb=yL(accP), yt=yL(accP+v); top=yt; h=yb-yt; accP+=v; }
+      else   { const yt=yL(accN), yb=yL(accN+v); top=yt; h=yb-yt; accN+=v; }
+      g+=`<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(0,h).toFixed(1)}" fill="${cp[2]}" opacity="0.9"><title>${r.ym} ${cp[1]} ${fmtK(v)}</title></rect>`;
+    });
+  });
+  g+=`<text x="16" y="${(y0+ph/2).toFixed(1)}" transform="rotate(-90 16 ${(y0+ph/2).toFixed(1)})" text-anchor="middle" font-size="11" fill="#64748b">金額(千円)</text>`;
+  rows.forEach((r,i)=>{ if(i%2===0||i===n-1){ const c=cx(i); g+=`<text x="${c.toFixed(1)}" y="${(y1+13).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b" transform="rotate(-60 ${c.toFixed(1)} ${(y1+13).toFixed(1)})">${r.ym.slice(2,4)}/${r.ym.slice(4)}</text>`; }});
+  return legendSvg_(comps.map(cp=>[cp[2],cp[1]]),x0,W)+`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img">${g}</svg>`;
+}
+function svgProfit_(rows, dept){
+  const deptLevel=(dept!=="ALL");
+  const vals=[]; rows.forEach(r=>{ if(deptLevel){ vals.push(r.cont_profit_pre||0,r.cont_profit_post||0); } else vals.push(r.operating_profit||0); });
+  let mn=Math.min(0,...vals), mx=Math.max(0,...vals);
+  mx=mx>0?niceMax(mx):1; mn=mn<0?-niceMax(-mn):0;
+  const W=1000,H=430,mL=68,mR=24,mT=10,mB=58,x0=mL,x1=W-mR,y0=mT,y1=H-mB,ph=y1-y0,n=rows.length,bw=(x1-x0)/n;
+  const yL=v=>y1-((v-mn)/(mx-mn))*ph, cx=i=>x0+bw*(i+0.5), yz=yL(0);
+  let g=""; const T=4;
+  for(let t=0;t<=T;t++){ const val=mn+(mx-mn)*t/T,y=yL(val); g+=`<line x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}" stroke="${Math.abs(val)<1e-9?'#cbd5e1':'#eef2f7'}"/><text x="${x0-6}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="10" fill="#94a3b8">${fmtK(val)}</text>`; }
+  const bar=(x,w,v,fill,tip)=>{ const yv=yL(v),top=Math.min(yv,yz),h=Math.max(0.5,Math.abs(yz-yv)); return `<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" opacity="0.9"><title>${tip}</title></rect>`; };
+  rows.forEach((r,i)=>{ const c=cx(i);
+    if(deptLevel){ const w=Math.max(3,bw*0.30), dx=bw*0.17;
+      g+=bar(c-dx-w/2,w,(r.cont_profit_pre||0),"#1f77b4",`${r.ym} 貢献利益 配賦前 ${fmtK(r.cont_profit_pre||0)}`);
+      g+=bar(c+dx-w/2,w,(r.cont_profit_post||0),"#17becf",`${r.ym} 貢献利益 配賦後 ${fmtK(r.cont_profit_post||0)}`);
+    } else { const w=Math.max(4,bw*0.6), v=r.operating_profit||0; g+=bar(c-w/2,w,v,(v>=0?"#ff7f0e":"#1f77b4"),`${r.ym} 営業利益 ${fmtK(v)}`); }
+  });
+  g+=`<text x="16" y="${(y0+ph/2).toFixed(1)}" transform="rotate(-90 16 ${(y0+ph/2).toFixed(1)})" text-anchor="middle" font-size="11" fill="#64748b">金額(千円)</text>`;
+  rows.forEach((r,i)=>{ if(i%2===0||i===n-1){ const c=cx(i); g+=`<text x="${c.toFixed(1)}" y="${(y1+13).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b" transform="rotate(-60 ${c.toFixed(1)} ${(y1+13).toFixed(1)})">${r.ym.slice(2,4)}/${r.ym.slice(4)}</text>`; }});
+  const leg=deptLevel?[["#1f77b4","貢献利益(配賦前)"],["#17becf","貢献利益(配賦後)"]]:[["#ff7f0e","営業利益(黒字)"],["#1f77b4","営業利益(赤字)"]];
+  return legendSvg_(leg,x0,W)+`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img">${g}</svg>`;
+}
+function svgYTD_(all){
+  if(!all.length) return "";
+  const last=all[all.length-1].ym, y=+last.slice(0,4), m=+last.slice(4), fy=(m>=4?y:y-1);
+  const cur=all.filter(r=>r.ym>=`${fy}04` && r.ym<=last);
+  if(!cur.length) return `<div class="note">当年度の累計データがありません。</div>`;
+  const prev=all.filter(r=>r.ym>=`${fy-1}04` && r.ym<=`${y-1}${last.slice(4)}`);
+  let cs=0,cg=0; const curC=cur.map(r=>{cs+=r.sales;cg+=r.gross_profit;return{ym:r.ym,cs,cg};});
+  let ps=0,pg=0; const prevC=prev.map(r=>{ps+=r.sales;pg+=r.gross_profit;return{ym:r.ym,cs:ps,cg:pg};});
+  const n=curC.length; let mx=0; curC.concat(prevC).forEach(r=>{mx=Math.max(mx,r.cs);}); mx=niceMax(mx||1);
+  const W=1000,H=300,mL=66,mR=20,mT=10,mB=44,x0=mL,x1=W-mR,y0=mT,y1=H-mB,ph=y1-y0,pw=x1-x0;
+  const yL=v=>y1-(v/mx)*ph, cx=i=>x0+(n>1?pw*i/(n-1):pw/2);
+  let g=""; const T=4;
+  for(let t=0;t<=T;t++){ const yy=yL(mx*t/T); g+=`<line x1="${x0}" y1="${yy.toFixed(1)}" x2="${x1}" y2="${yy.toFixed(1)}" stroke="#eef2f7"/><text x="${x0-6}" y="${(yy+3).toFixed(1)}" text-anchor="end" font-size="10" fill="#94a3b8">${fmtK(mx*t/T)}</text>`; }
+  const line=(arr,key,col,dash)=>{ if(arr.length<1)return ""; const pts=arr.map((r,i)=>`${cx(i).toFixed(1)},${yL(r[key]).toFixed(1)}`).join(" "); return `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2.2" ${dash?'stroke-dasharray="5 3"':''}/>`; };
+  g+=line(prevC,"cs","#a6c8e0",true)+line(prevC,"cg","#ffcc80",true)+line(curC,"cs","#1f77b4",false)+line(curC,"cg","#ff7f0e",false);
+  curC.forEach((r,i)=>{ g+=`<circle cx="${cx(i).toFixed(1)}" cy="${yL(r.cs).toFixed(1)}" r="2.5" fill="#1f77b4"><title>${r.ym} 累計売上 ${fmtK(r.cs)}</title></circle><circle cx="${cx(i).toFixed(1)}" cy="${yL(r.cg).toFixed(1)}" r="2.5" fill="#ff7f0e"><title>${r.ym} 累計粗利 ${fmtK(r.cg)}</title></circle>`; });
+  curC.forEach((r,i)=>{ g+=`<text x="${cx(i).toFixed(1)}" y="${(y1+13).toFixed(1)}" text-anchor="middle" font-size="9" fill="#64748b">${r.ym.slice(4)}月</text>`; });
+  g+=`<line x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}" stroke="#cbd5e1"/>`;
+  const leg=[["#1f77b4","累計売上"],["#ff7f0e","累計粗利"],["#a6c8e0","前年累計売上"],["#ffcc80","前年累計粗利"]];
+  let lx=x0,lg=""; leg.forEach(a=>{ lg+=`<rect x="${lx}" y="0" width="11" height="11" rx="2" fill="${a[0]}"/><text x="${lx+15}" y="9.5" font-size="11" fill="#334155">${a[1]}</text>`; lx+=15+a[1].length*13+16; });
+  return `<svg viewBox="0 0 ${W} 14" style="width:100%;height:16px" role="img">${lg}</svg><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img">${g}</svg>`;
+}
+function svgProductivity_(rows){
+  let mx=0; rows.forEach(r=>{ mx=Math.max(mx,r.sales_per_man_hour||0,r.productivity_per_man_hour||0); });
+  const b=chartBase_(rows,{maxLeft:mx,leftTitle:"円/人時"});
+  let g=""; const w=Math.max(4,b.bw*0.6);
+  rows.forEach((r,i)=>{ const x=b.cx(i)-w/2, s=r.sales_per_man_hour||0, p=r.productivity_per_man_hour||0;
+    g+=`<rect x="${x.toFixed(1)}" y="${b.yL(s).toFixed(1)}" width="${w.toFixed(1)}" height="${(b.y1-b.yL(s)).toFixed(1)}" fill="#1f77b4" opacity="0.85"><title>${r.ym} 人時売上 ${fmtK(s)}</title></rect>`;
+    g+=`<rect x="${x.toFixed(1)}" y="${b.yL(p).toFixed(1)}" width="${w.toFixed(1)}" height="${(b.y1-b.yL(p)).toFixed(1)}" fill="#2ca02c" opacity="0.85"><title>${r.ym} 人時生産性 ${fmtK(p)}</title></rect>`;
+  });
+  return legendSvg_([["#1f77b4","人時売上"],["#2ca02c","人時生産性"]],b.x0,b.W)+svgWrap_(b,g);
+}
+
+/* ── データ管理（管理者アップロード）── */
+const _XLSX_MIME="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+function fileB64_(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(",")[1]); r.onerror=rej; r.readAsDataURL(file); }); }
+function busyOverlay_(show,title,sub){ let o=$("busyOverlay"); if(!show){ if(o)o.remove(); return; } if(!o){ o=document.createElement("div"); o.id="busyOverlay"; document.body.appendChild(o); } o.innerHTML=`<div class="bcard"><span class="spin"></span><div class="bttl">${esc(title||"処理中です")}</div><div class="bsub">${esc(sub||"画面を閉じずにお待ちください")}</div></div>`; }
+function renderDataManage_(){
+  $("app").innerHTML=
+    `<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><h2 class="title">データ管理（管理者）</h2>`+
+    `<button class="btn" style="margin-left:auto" onclick="backToViz_()">← 可視化へ戻る</button></div>`+
+    `<div class="dmcard">`+
+    `<p class="lb">部門別損益・効率表Excel と 年度予算Excel を取り込みます。アップロード＝本部側の取込（ETL→outbox）を経て可視化へ反映されます（即時ではありません）。</p>`+
+    dmZone_("loss","① 損益実績Excel（部門別損益・効率表）","月次の実績。年度を差し替える時は、その年度の月ファイルを揃えてアップロードしてください。")+
+    dmZone_("budget","② 年度予算Excel（例: 2025年度予算（北関東）.xlsx）","エリア別の年度予算。")+
+    `<div style="margin-top:14px"><button class="btn primary" id="dmUpBtn" onclick="dmUpload_()">選択したファイルをアップロード</button> <span id="dmMsg" class="lb"></span></div>`+
+    (IS_GAS?"":`<p class="lb" style="color:#b45309;margin-top:10px">※ ローカル開発ではアップロードは無効（本番=GAS接続時に有効）。UI確認用です。</p>`)+
+    `</div>`;
+  dmRenderQ_();
+}
+function dmZone_(type,title,hint){
+  return `<div class="dmzone"><h4>${esc(title)}</h4><p class="hint">${esc(hint)}</p>`+
+    `<input type="file" accept=".xlsx" multiple onchange="dmPick_('${type}',this)">`+
+    `<div class="uplist" id="dmq_${type}"></div></div>`;
+}
+function dmPick_(type,input){
+  [...input.files].forEach(f=>{ if(!S.upQ.some(x=>x.type===type&&x.name===f.name&&x.size===f.size)) S.upQ.push({type,file:f,name:f.name,size:f.size,done:false}); });
+  input.value=""; dmRenderQ_();
+}
+function dmRenderQ_(){
+  ["loss","budget"].forEach(type=>{
+    const host=$("dmq_"+type); if(!host) return;
+    const items=S.upQ.filter(x=>x.type===type);
+    host.innerHTML=items.length?items.map((x,i)=>`<div class="uprow"><span class="st">${x.done?"✅":"📄"}</span><span>${esc(x.name)}</span><span class="x" onclick="dmDel_('${type}',${i})">✕</span></div>`).join(""):`<div class="uprow" style="color:#94a3b8">（未選択）</div>`;
+  });
+}
+function dmDel_(type,i){ const items=S.upQ.filter(x=>x.type===type); const t=items[i]; S.upQ=S.upQ.filter(x=>x!==t); dmRenderQ_(); }
+async function dmUpload_(){
+  const items=S.upQ.filter(x=>!x.done);
+  if(!items.length){ $("dmMsg").textContent="アップロードするファイルを選んでください"; return; }
+  if(!IS_GAS){ $("dmMsg").textContent="ローカルではアップロードできません（本番でご利用ください）"; return; }
+  const btn=$("dmUpBtn"); btn.disabled=true;
+  busyOverlay_(true,"アップロード中です",`0 / ${items.length} 件`);
+  let ok=0,ng=0;
+  for(let i=0;i<items.length;i++){ const x=items[i];
+    busyOverlay_(true,"アップロード中です",`${i+1} / ${items.length} 件目：${x.name}`);
+    try{ await gsCall("uploadInbox", x.type, x.name, await fileB64_(x.file), _XLSX_MIME); x.done=true; ok++; }
+    catch(e){ ng++; }
+  }
+  busyOverlay_(false); btn.disabled=false;
+  $("dmMsg").textContent = `${ok} 件アップロード完了${ng?`／${ng} 件失敗`:""}。本部側の取込（ETL→outbox）後に反映されます。`;
+  S.upQ=S.upQ.filter(x=>!x.done); dmRenderQ_();
+}
+function backToViz_(){ renderApp_(); loadAndRender_(); }
+
+function openGuide(){ alert("ご利用ガイドは準備中です。画面が整い次第、ヒッスルと同じ📖ガイドを搭載します。"); }
+
+async function boot(){
+  if(IS_LOCAL){ S.isAdmin=true; await startApp_(); return; }   // ローカル: 認証なし・モック・管理者扱いでUI確認
+  if(!GAS_READY){
+    $("app").innerHTML=`<div class="card"><div class="cico">🛠️</div><h3>部門損益 可視化（GitHub＋GAS 版・準備中）</h3>`+
+      `<p>フロントの土台とv1チャートを実装しました。<br>バックエンド（soneki-gas）のデプロイ URL を設定すると、会社アカウントのログインとデータ接続が有効になります。</p>`+
+      `<div class="roadmap"><b>実装予定（段階リリース）</b><ul>`+
+      `<li>v1：売上・粗利・粗利率トレンド＋前年対比 ✅ 実装済（GAS接続待ち）</li><li>v2：予算対比（+YTD累計）</li><li>v3：比較内訳（販管費）</li>`+
+      `</ul></div>`+
+      `<div style="margin-top:16px"><button class="btn primary" onclick="startDemo_()">▶ サンプルデータで表示を見る（デモ）</button>`+
+      `<p class="lb" style="margin-top:6px">実データは本部取込後に表示されます。デモは色・見せ方の確認用です。</p></div></div>`;
+    return;
+  }
+  if(restoreAccessToken_()){ try{ await afterAuth_(); return; }catch(e){} }
+  try{ await requestAccessTokenOnce_({silent:true}); await afterAuth_(); }
+  catch(e){ renderLogin_(); }
+}
+boot();
+</script>
+</body>
+</html>

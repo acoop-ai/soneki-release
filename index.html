@@ -105,7 +105,7 @@
 <body>
 <header>
   <span class="logo">AC</span>
-  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-27b</span></h1></div>
+  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-27c</span></h1></div>
   <span class="user" id="user"></span>
   <button class="btn ghelp" onclick="openGuide()" title="このシステムの使い方">📖 ご利用ガイド</button>
 </header>
@@ -795,31 +795,14 @@ async function dmUpload_(){
 function backToViz_(){ renderDash_(); }
 
 /* ── ご利用ガイド（標準レイアウト: サイド目次＋メイン本文・双方向連動） ──
-   目次はセクション定義から自動生成し、本文スクロールで現在位置をハイライト（scroll-spy）。
-   目次クリックで本文へスクロール。狭幅ではチップ状に折り畳み。印刷は本文のみ。 */
-const GUIDE_SECTIONS=[
-  {id:"g-about", t:"このシステムについて"},
-  {id:"g-start", t:"使い始める（範囲を選ぶ）"},
-  {id:"g-modes", t:"3つの分析モード", subs:[
-    {id:"g-mode-deep", t:"総合分析"},
-    {id:"g-mode-comp", t:"比較・内訳"},
-    {id:"g-mode-budget", t:"予算対比"}]},
-  {id:"g-period", t:"表示期間のきまり"},
-  {id:"g-charts", t:"5つのチャートの見方", subs:[
-    {id:"g-c1", t:"① 売上・粗利・粗利率"},
-    {id:"g-c2", t:"② ロス管理"},
-    {id:"g-c3", t:"③ 経費構造"},
-    {id:"g-c4", t:"④ 利益構造"},
-    {id:"g-c5", t:"⑤ 労働生産性"}]},
-  {id:"g-yoy", t:"前年対比の色のルール"},
-  {id:"g-data", t:"データの更新について"},
-  {id:"g-admin", t:"データ管理（管理者）", admin:true},
-  {id:"g-faq", t:"困ったときは"}
-];
+   本文と目次は GAS（Guide.gs）が唯一の原本。公開HTMLには本文を置かない（PO方針 2026-07-27）。
+   認証済みユーザーだけが getGuide で受け取る。管理者節はサーバー側で出し分け（非管理者には届かない）。
+   フロントは「入れ物」のみ: 目次クリック→本文スクロール／本文スクロール→目次ハイライト(scroll-spy)。 */
+let _gSecs=[];      // 表示中ガイドの目次定義（GASから受領）
+let _gForce=null;   // 目次クリックで指定された見出し（利用者が自分でスクロールするまで優先）
 function guideNavHtml_(){
   let h="";
-  GUIDE_SECTIONS.forEach(s=>{
-    if(s.admin && !S.isAdmin) return;
+  _gSecs.forEach(s=>{
     h+=`<a href="#${s.id}" data-gid="${s.id}" onclick="return gJump_('${s.id}')">${esc(s.t)}</a>`;
     (s.subs||[]).forEach(x=>{ h+=`<a class="sub" href="#${x.id}" data-gid="${x.id}" onclick="return gJump_('${x.id}')">${esc(x.t)}</a>`; });
   });
@@ -845,10 +828,10 @@ function gJump_(id){
   setTimeout(()=>{ if(Math.abs(gb.scrollTop-to)>1){ if(_gAnim) cancelAnimationFrame(_gAnim); _gAnim=null; gb.scrollTop=to; gSpy_(); } }, dur+90);
   return false;
 }
-let _gForce=null;   // 目次クリックで指定された見出し（利用者が自分でスクロールするまで優先）
 function gSpy_(){
   const body=document.querySelector("#guide .gbody"); if(!body) return;
-  const ids=[]; GUIDE_SECTIONS.forEach(s=>{ if(s.admin&&!S.isAdmin) return; ids.push(s.id); (s.subs||[]).forEach(x=>ids.push(x.id)); });
+  const ids=[]; _gSecs.forEach(s=>{ ids.push(s.id); (s.subs||[]).forEach(x=>ids.push(x.id)); });
+  if(!ids.length) return;
   const r=body.getBoundingClientRect(), top=r.top+16;
   let cur=ids[0];
   if(_gForce && ids.indexOf(_gForce)>=0){
@@ -861,116 +844,66 @@ function gSpy_(){
   }
   document.querySelectorAll("#guide .gnav a").forEach(a=>a.classList.toggle("on", a.dataset.gid===cur));
 }
-function openGuide(){
-  const adminSec = S.isAdmin?`
-    <h3 id="g-admin">データ管理（管理者）<span class="gadmin">管理者のみ</span></h3>
-    <p>右上の「⚙️ データ管理」から、①損益実績Excel（部門別損益・効率表／部門損益検討表）と②年度予算Excelをアップロードできます。</p>
-    <p>アップロードしたファイルは本部（HQ）側で取り込み・集計されたうえで画面に反映されます。<b>アップロード直後に画面が変わるわけではありません</b>のでご注意ください。</p>
-    <div class="gnote">年度を差し替えるときは、その年度の月ファイルを揃えてアップロードしてください。</div>`:"";
-  const body=`
-    <h3 id="g-about">このシステムについて</h3>
-    <p>部門損益検討表をもとに、<b>エリア・店舗・部門ごとの損益</b>を月次のグラフで確認する画面です。売上や粗利だけでなく、ロス（廃棄・値引）、経費の内訳、利益、労働生産性まで、同じ範囲で並べて見られます。</p>
-    <div class="gnote">数値の単位は<b>千円</b>です。率は小数第1位まで表示します。</div>
-
-    <h3 id="g-start">使い始める（範囲を選ぶ）</h3>
-    <p>最初に「どこを見るか」を3つの質問で選びます。選び終わるとすぐにグラフが表示されます。</p>
-    <ol>
-      <li><b>範囲</b> … エリア全体（エリア合計）か、店舗ごとか</li>
-      <li><b>対象</b> … どのエリアか（店舗ごとを選んだ場合は、続けて店舗を選択）</li>
-      <li><b>部門</b> … 合計（全部門）か、農産・畜産などの個別部門か</li>
-    </ol>
-    <p>表示された後は、画面上部のフィルタでいつでも変更できます。選び直したいときは <b>🧭 最初から選び直す</b> を押してください。</p>
-
-    <h3 id="g-modes">3つの分析モード</h3>
-    <p>画面上部の切替ボタンで、目的に応じて3つのモードを行き来できます。</p>
-    <h4 id="g-mode-deep">総合分析</h4>
-    <p><b>1つの対象をじっくり見る</b>モードです。選んだ範囲について、5つのチャートを縦に並べて表示します。「この店のこの部門は、今どうなっているか」を把握するときに使います。</p>
-    <h4 id="g-mode-comp">比較・内訳</h4>
-    <p><b>複数の対象を横並びで比べる</b>モードです。1つの指標を選び、対象ごとに同じグラフを並べます。比べ方は3種類です。</p>
-    <ul>
-      <li><b>エリア合計で比較</b> … 全エリアを並べる</li>
-      <li><b>1店舗の部門内訳を比較</b> … 1つの店舗の中を部門別に並べる</li>
-      <li><b>エリア内の店舗で比較</b> … 同じエリアの店舗を並べる</li>
-    </ul>
-    <h4 id="g-mode-budget">予算対比</h4>
-    <p>実績と予算を比べるモードです。<b>年度予算Excelの取込が完了した範囲</b>で表示できます。未取込の場合は、その旨の案内が出ます。</p>
-
-    <h3 id="g-period">表示期間のきまり</h3>
-    <table>
-      <tr><th>表示</th><th>期間</th><th>補足</th></tr>
-      <tr><td>通常</td><td>最新月から<b>24ヶ月</b></td><td>直近2年分の推移を見ます</td></tr>
-      <tr><td>前年対比</td><td>最新月から<b>12ヶ月</b></td><td>前年の同じ月と並べて比べます</td></tr>
-      <tr><td>累計（年度）</td><td>4月から最新月まで</td><td>前年対比のときに先頭へ表示。実線=当年・破線=前年</td></tr>
-    </table>
-    <div class="gnote">前年のデータが無い月は、前年対比では表示されません（比べる相手がいないため）。</div>
-
-    <h3 id="g-charts">5つのチャートの見方</h3>
-    <h4 id="g-c1">① 売上・粗利・粗利率</h4>
-    <p>棒が<span class="sw" style="background:#1f77b4"></span>売上と<span class="sw" style="background:#ff7f0e"></span>粗利、赤い折線が粗利率（右側の目盛り）です。売上の棒の手前に粗利の棒が重なって表示されます。</p>
-    <h4 id="g-c2">② ロス管理</h4>
-    <p><span class="sw" style="background:#d62728"></span>廃棄額と<span class="sw" style="background:#C71585"></span>値引額を積み上げた棒、折線がそれぞれの率と<span class="sw" style="background:#FFAB00"></span>ロス率計（右側の目盛り）です。</p>
-    <h4 id="g-c3">③ 経費構造</h4>
-    <p>販管費の内訳（人件費・販売費・管理費A・管理費B・減価償却費）を積み上げた棒です。前年対比のときは<b>6つの個別チャート</b>（販管費計＋5項目）に分かれます。</p>
-    <div class="gwarn">減価償却費などは、会計上の調整でまれに<b>マイナス</b>になることがあります。その場合はゼロ線より<b>下向き</b>に表示されます（異常値ではありません）。</div>
-    <h4 id="g-c4">④ 利益構造</h4>
-    <p>部門を選んでいるときは<b>貢献利益</b>（<span class="sw" style="background:#1f77b4"></span>配賦前と<span class="sw" style="background:#17becf"></span>配賦後を横並び）、合計（全部門）のときは<b>営業利益</b>（<span class="sw" style="background:#ff7f0e"></span>黒字＝橙・<span class="sw" style="background:#1f77b4"></span>赤字＝青）を表示します。</p>
-    <h4 id="g-c5">⑤ 労働生産性</h4>
-    <p><span class="sw" style="background:#1f77b4"></span>人時売上高と<span class="sw" style="background:#2ca02c"></span>人時生産性（いずれも円/人時）です。</p>
-
-    <h3 id="g-yoy">前年対比の色のルール</h3>
-    <p>前年対比では、<b>前年の数値を灰色の影</b>として後ろに表示し、当年の棒を手前に重ねます。当年の棒の濃さで良し悪しが分かります。</p>
-    <table>
-      <tr><th>見え方</th><th>意味</th></tr>
-      <tr><td><b>濃い（はっきり）</b></td><td>前年より良い（売上・利益は増加／ロス・経費は減少）</td></tr>
-      <tr><td><b>薄い（うすい）</b></td><td>前年より悪い</td></tr>
-    </table>
-    <div class="gnote">ロスや経費は「減った方が良い」ため、<b>減っていると濃く</b>表示されます。売上や利益とは逆ですのでご注意ください。</div>
-
-    <h3 id="g-data">データの更新について</h3>
-    <p>画面上部の「データ更新」の表示が、今見えているデータの作成日時です。データは本部（HQ）側で取り込み・集計されたうえで反映されます。</p>
-    <p>部門の行が無い月（例：取扱いを終了した部門）は、その月のグラフには表示されません。</p>
-    ${adminSec}
-    <h3 id="g-faq">困ったときは</h3>
-    <table>
-      <tr><th>症状</th><th>確認すること</th></tr>
-      <tr><td>「この範囲のデータがありません」と出る</td><td>その店舗・部門の組み合わせにデータが無い可能性があります。部門を「合計（全部門）」に戻してお試しください。</td></tr>
-      <tr><td>前年対比が表示されない</td><td>前年同月のデータが揃っていない範囲です。通常表示でご確認ください。</td></tr>
-      <tr><td>予算対比が「未取込」と出る</td><td>その範囲の年度予算Excelがまだ取り込まれていません。本部へご確認ください。</td></tr>
-      <tr><td>数字が実際と違う気がする</td><td>元の検討表Excelの値をそのまま表示しています。元データをご確認のうえ、本部へご連絡ください。</td></tr>
-    </table>`;
+/* ガイドの取得と描画。g=null: 未接続の案内 ／ "loading": 読込中 ／ {error}: 失敗 ／ {sections,html}: 本文 */
+function renderGuide_(g){
+  closeGuide();
+  let inner;
+  if(g==="loading"){
+    inner=`<div class="note" style="padding:40px;text-align:center"><span class="spin"></span><br><br>ご利用ガイドを読み込んでいます…</div>`;
+  } else if(!g){
+    inner=`<div class="note" style="padding:28px 32px;line-height:2">ご利用ガイドは<b>本番接続後</b>に表示されます（会社アカウントでのログインが必要です）。<br>`+
+          `いま表示中のデモは色・見せ方の確認用のため、ガイド本文は含まれていません。</div>`;
+  } else if(g.error){
+    inner=`<div class="err" style="margin:20px">ご利用ガイドを取得できませんでした：${esc(g.error)}<br>時間をおいて再度お試しください。</div>`;
+  } else {
+    _gSecs=g.sections||[];
+    inner=`<div class="gwrap"><nav class="gnav">${guideNavHtml_()}</nav><div class="gbody">${g.html||""}</div></div>`;
+  }
   const el=document.createElement("div");
   el.id="guide";
   el.innerHTML=`<div class="gcard">
     <div class="ghead"><h2>📖 ご利用ガイド</h2><span class="gsub">部門損益 可視化</span>
       <button class="btn gclose" onclick="closeGuide()">閉じる</button></div>
-    <div class="gwrap"><nav class="gnav">${guideNavHtml_()}</nav><div class="gbody">${body}</div></div>
+    ${inner}
   </div>`;
   el.addEventListener("click",e=>{ if(e.target===el) closeGuide(); });
   document.body.appendChild(el);
   const gb=el.querySelector(".gbody");
-  gb.addEventListener("scroll", gSpy_);
-  // 利用者が自分でスクロール操作をしたら「クリック指定」を解除し、現在位置の追従に戻す
-  const release=()=>{ _gForce=null; gSpy_(); };
-  ["wheel","touchstart","keydown","mousedown"].forEach(ev=>gb.addEventListener(ev, release, {passive:true}));
-  _gForce=null;
-  gSpy_();
+  if(gb){
+    gb.addEventListener("scroll", gSpy_);
+    // 利用者が自分でスクロール操作をしたら「クリック指定」を解除し、現在位置の追従に戻す
+    const release=()=>{ _gForce=null; gSpy_(); };
+    ["wheel","touchstart","keydown","mousedown"].forEach(ev=>gb.addEventListener(ev, release, {passive:true}));
+    _gForce=null;
+    gSpy_();
+  }
+}
+async function openGuide(){
+  if(S.guideData){ renderGuide_(S.guideData); return; }        // セッション内キャッシュ
+  if(!GAS_READY){ renderGuide_(null); return; }                 // デモ/未接続: 案内のみ（本文は配布しない）
+  renderGuide_("loading");
+  try{ const g=await gsCall("getGuide"); S.guideData=g; renderGuide_(g); }
+  catch(e){ renderGuide_({error:String(e&&e.message||e)}); }
 }
 function closeGuide(){ const g=$("guide"); if(g) g.remove(); }
 
+/* ポータル等からの直リンク（?guide=1）: 起動処理の完了後にご利用ガイドを自動で開く */
+function autoGuide_(){ if(/[?&]guide=1/.test(location.search)) openGuide(); }
 async function boot(){
-  if(IS_LOCAL){ S.isAdmin=true; await startApp_(); return; }   // ローカル: 認証なし・モック・管理者扱いでUI確認
+  if(IS_LOCAL){ S.isAdmin=true; await startApp_(); autoGuide_(); return; }   // ローカル: 認証なし・モック・管理者扱いでUI確認
   if(!GAS_READY){
     $("app").innerHTML=`<div class="card"><div class="cico">🛠️</div><h3>部門損益 可視化（GitHub＋GAS 版・準備中）</h3>`+
-      `<p>フロントの土台とv1チャートを実装しました。<br>バックエンド（soneki-gas）のデプロイ URL を設定すると、会社アカウントのログインとデータ接続が有効になります。</p>`+
-      `<div class="roadmap"><b>実装予定（段階リリース）</b><ul>`+
-      `<li>v1：売上・粗利・粗利率トレンド＋前年対比 ✅ 実装済（GAS接続待ち）</li><li>v2：予算対比（+YTD累計）</li><li>v3：比較内訳（販管費）</li>`+
+      `<p>画面（3つの分析モード＋入口ウィザード）は実装済みです。<br>バックエンド（soneki-gas）のデプロイ URL を設定すると、会社アカウントのログインと実データ表示が有効になります。</p>`+
+      `<div class="roadmap"><b>現在の状態</b><ul>`+
+      `<li>総合分析（通常24ヶ月／前年対比12ヶ月＋累計） ✅ 実装済</li><li>比較・内訳（3つの比べ方×10チャート） ✅ 実装済</li><li>予算対比 … 年度予算Excelの取込後に有効</li>`+
       `</ul></div>`+
       `<div style="margin-top:16px"><button class="btn primary" onclick="startDemo_()">▶ サンプルデータで表示を見る（デモ）</button>`+
       `<p class="lb" style="margin-top:6px">実データは本部取込後に表示されます。デモは色・見せ方の確認用です。</p></div></div>`;
+    autoGuide_();                                  // 未接続でも ?guide=1 は案内を表示（本文は本番接続後）
     return;
   }
-  if(restoreAccessToken_()){ try{ await afterAuth_(); return; }catch(e){} }
-  try{ await requestAccessTokenOnce_({silent:true}); await afterAuth_(); }
+  if(restoreAccessToken_()){ try{ await afterAuth_(); autoGuide_(); return; }catch(e){} }
+  try{ await requestAccessTokenOnce_({silent:true}); await afterAuth_(); autoGuide_(); }
   catch(e){ renderLogin_(); }
 }
 boot();

@@ -37,6 +37,12 @@
   .modeseg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
   .modeseg button{border:none;background:#fff;padding:6px 12px;font-size:13px;cursor:pointer;color:#334155;}
   .modeseg button.on{background:#f39800;color:#fff;font-weight:600;}
+  .wcard{border:1px solid var(--border);border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.04);padding:20px 22px;margin-top:14px;}
+  .wq{margin:10px 0 16px;} .wqt{font-size:14px;font-weight:700;margin-bottom:8px;color:#0f172a;}
+  .wopts{display:flex;flex-wrap:wrap;gap:8px;}
+  .wbtn{border:1.5px solid var(--border);border-radius:10px;background:#fff;cursor:pointer;font-size:13.5px;padding:9px 14px;color:#334155;}
+  .wbtn:hover{border-color:#f39800;background:#fff7ed;}
+  .wbtn.on{border-color:#f39800;background:#f39800;color:#fff;font-weight:700;}
   .chartcard{border:1px solid var(--border);border-radius:12px;background:#fff;padding:12px 14px;margin-top:8px;}
   .chartcard .chead{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;}
   .chartcard .chead b{font-size:14px;} .chartcard .chead .lb{font-size:11px;}
@@ -60,7 +66,7 @@
 <body>
 <header>
   <span class="logo">AC</span>
-  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-24d</span></h1></div>
+  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-27a</span></h1></div>
   <span class="user" id="user"></span>
   <button class="btn ghelp" onclick="openGuide()" title="このシステムの使い方（準備中）">📖 ご利用ガイド</button>
 </header>
@@ -146,7 +152,14 @@ async function loadJson(name){
 async function startDemo_(){ DEMO=true; S.isAdmin=false; $("user").textContent="デモ表示（サンプルデータ）"; await startApp_(); }
 
 /* ── 状態 ── */
-const S={ meta:null, area:"", scope:"AREA", dept:"ALL", mode:"通常", series:null, isAdmin:false, upQ:[] };
+const S={ meta:null,
+  view:"wizard",                                 // wizard=入口ウィザード ／ dash=分析画面
+  mode:"総合",                                    // 総合 ／ 比較 ／ 予算（3分析モード）
+  sub:"通常",                                     // 通常 ／ 前年対比（総合・比較で有効。窓=24／12+累計）
+  area:"", scope:"AREA", dept:"ALL",              // 総合分析・予算対比の対象
+  comp:{ kind:"AREAS", area:"", store:"", dept:"ALL", chart:"①" },  // 比較・内訳の条件
+  wiz:{ step:1, kind:null, area:null, store:null },                   // ウィザード進行
+  series:null, isAdmin:false, upQ:[] };
 const aslug_=a=>{ const x=(S.meta.areas||[]).find(o=>o.name===a); return x?x.slug:a; };
 const dslug_=d=>{ if(d==="ALL")return "ALL"; const x=(S.meta.depts||[]).find(o=>o.name===d); return x?x.slug:d; };
 
@@ -177,38 +190,110 @@ async function startApp_(){
   try{ S.meta = await loadJson("meta.json"); }
   catch(e){ $("app").innerHTML=`<div class="err">データ（meta.json）を取得できません：${esc(String(e&&e.message||e))}</div>`; return; }
   S.area = (S.meta.areas[0]||{}).name || "";
-  renderApp_(); await loadAndRender_();
+  S.wiz={ step:1, kind:null, area:null, store:null };
+  renderWizard_();                                // スコープ先行: 最初に見たい範囲を選んでから表示
 }
 function storesOfArea_(area){ return (S.meta.stores||[]).filter(s=>s.area===area); }
-function renderApp_(){
-  const areaSel=`<select id="fArea" onchange="onArea(this.value)">`+S.meta.areas.map(a=>`<option value="${esc(a.name)}" ${a.name===S.area?"selected":""}>${esc(a.name)}</option>`).join("")+`</select>`;
-  const sts=storesOfArea_(S.area);
-  const storeSel=`<select id="fScope" onchange="onScope(this.value)"><option value="AREA" ${S.scope==="AREA"?"selected":""}>エリア合計</option>`+
-    sts.map(s=>`<option value="${esc(s.slug)}" ${s.slug===S.scope?"selected":""}>${esc(s.store_name)}</option>`).join("")+`</select>`;
-  const deptSel=`<select id="fDept" onchange="onDept(this.value)"><option value="ALL" ${S.dept==="ALL"?"selected":""}>合計（全部門）</option>`+
-    S.meta.depts.map(d=>`<option value="${esc(d.name)}" ${d.name===S.dept?"selected":""}>${esc(d.name)}</option>`).join("")+`</select>`;
-  const modeSeg=`<span class="modeseg">`+["通常","前年対比"].map(m=>`<button class="${S.mode===m?'on':''}" onclick="onMode('${m}')">${m}</button>`).join("")+`</span>`;
+function demoBanner_(){ return DEMO?`<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 12px;font-size:12.5px;margin-bottom:8px">🧪 これは<b>サンプルデータのデモ表示</b>です（実データではありません）。色・見せ方の確認用。実データは本部取込後に表示されます。</div>`:""; }
+
+/* ── 入口ウィザード（スコープ先行: Q1範囲 → Q2対象 → Q3部門 → 表示。原本の「フィルタから探す」を反転） ── */
+function renderWizard_(){
+  S.view="wizard"; const w=S.wiz;
+  let q1=`<div class="wq"><div class="wqt">Q1. どの範囲を見ますか？</div><div class="wopts">`+
+    `<button class="wbtn ${w.kind==="AREA"?"on":""}" onclick="wizKind_('AREA')">🗺️ エリア全体（エリア合計）</button>`+
+    `<button class="wbtn ${w.kind==="STORE"?"on":""}" onclick="wizKind_('STORE')">🏬 店舗ごと</button>`+
+    `</div></div>`;
+  let q2="";
+  if(w.step>=2){
+    const areaBtns=S.meta.areas.map(a=>`<button class="wbtn ${w.area===a.name?"on":""}" onclick="wizArea_('${esc(a.name)}')">${esc(a.name)}</button>`).join("");
+    q2=`<div class="wq"><div class="wqt">Q2. ${w.kind==="AREA"?"どのエリアを見ますか？":"どの店舗を見ますか？（エリア → 店舗）"}</div><div class="wopts">${areaBtns}</div>`;
+    if(w.kind==="STORE" && w.area){
+      q2+=`<div class="wopts" style="margin-top:8px">`+storesOfArea_(w.area).map(s=>`<button class="wbtn ${w.store===s.slug?"on":""}" onclick="wizStore_('${esc(s.slug)}')">${esc(s.store_name)}</button>`).join("")+`</div>`;
+    }
+    q2+=`</div>`;
+  }
+  let q3="";
+  if(w.step>=3){
+    q3=`<div class="wq"><div class="wqt">Q3. 何を見ますか？（選ぶとすぐ表示されます）</div><div class="wopts">`+
+      `<button class="wbtn" onclick="wizDept_('ALL')">Σ 合計（全部門）</button>`+
+      S.meta.depts.map(d=>`<button class="wbtn" onclick="wizDept_('${esc(d.name)}')">${esc(d.name)}</button>`).join("")+
+      `</div></div>`;
+  }
   $("app").innerHTML=
-    (DEMO?`<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 12px;font-size:12.5px;margin-bottom:8px">🧪 これは<b>サンプルデータのデモ表示</b>です（実データではありません）。色・見せ方の確認用。実データは本部取込後に表示されます。</div>`:"")+
-    `<div style="margin-bottom:4px"><h2 class="title">部門損益 可視化</h2><p class="subtitle">部門別の売上・粗利・粗利率を月次トレンドで確認（v1）</p></div>`+
-    `<div class="selbar"><span class="lb">エリア</span>${areaSel}<span class="lb">店舗</span>${storeSel}<span class="lb">部門</span>${deptSel}`+
-    `<span class="lb" style="margin-left:12px">表示</span>${modeSeg}`+
-    (S.isAdmin?`<button class="admin-btn" style="margin-left:auto" onclick="renderDataManage_()" title="Excelの取込（管理者向け）">⚙️ データ管理</button>`:`<span style="margin-left:auto"></span>`)+
+    demoBanner_()+
+    `<div style="max-width:780px;margin:3vh auto 0">`+
+    `<h2 class="title" style="text-align:center">部門損益 可視化</h2>`+
+    `<p class="subtitle" style="text-align:center">見たい範囲を選ぶと分析画面が開きます。モードや対象はあとから自由に変更できます。</p>`+
+    `<div class="wcard">${q1}${q2}${q3}</div></div>`;
+}
+function wizKind_(k){ S.wiz.kind=k; S.wiz.step=2; S.wiz.area=null; S.wiz.store=null; renderWizard_(); }
+function wizArea_(a){ S.wiz.area=a; S.wiz.store=null; if(S.wiz.kind==="AREA") S.wiz.step=3; renderWizard_(); }
+function wizStore_(s){ S.wiz.store=s; S.wiz.step=3; renderWizard_(); }
+function wizDept_(d){
+  S.area=S.wiz.area; S.scope=(S.wiz.kind==="AREA")?"AREA":S.wiz.store; S.dept=d;
+  S.mode="総合"; S.sub="通常"; renderDash_();
+}
+function reopenWizard_(){ S.wiz={ step:1, kind:null, area:null, store:null }; renderWizard_(); }
+
+/* ── 共通セレクト部品 ── */
+function areaSelect_(id,fn,val){ return `<select id="${id}" onchange="${fn}(this.value)">`+S.meta.areas.map(a=>`<option value="${esc(a.name)}" ${a.name===val?"selected":""}>${esc(a.name)}</option>`).join("")+`</select>`; }
+function storeSelect_(id,fn,area,val){ return `<select id="${id}" onchange="${fn}(this.value)">`+storesOfArea_(area).map(s=>`<option value="${esc(s.slug)}" ${s.slug===val?"selected":""}>${esc(s.store_name)}</option>`).join("")+`</select>`; }
+function deptSelect_(id,fn,val,withAll){ return `<select id="${id}" onchange="${fn}(this.value)">`+(withAll?`<option value="ALL" ${val==="ALL"?"selected":""}>合計（全部門）</option>`:"")+S.meta.depts.map(d=>`<option value="${esc(d.name)}" ${d.name===val?"selected":""}>${esc(d.name)}</option>`).join("")+`</select>`; }
+
+/* ── 分析画面（3モード: 総合分析 ／ 比較・内訳 ／ 予算対比） ── */
+function modeDesc_(){
+  return S.mode==="総合"?"1つの対象を5つの指標で深掘り（総合分析）"
+       : S.mode==="比較"?"複数の対象を1つの指標で横比較（比較・内訳）"
+       : "実績と予算の対比（予算対比）";
+}
+function compFilters_(){
+  const c=S.comp;
+  const kindSel=`<select id="cKind" onchange="onCompKind(this.value)">`+
+    [["AREAS","エリア合計で比較"],["STORE_DEPTS","1店舗の部門内訳を比較"],["STORES","エリア内の店舗で比較"]]
+    .map(o=>`<option value="${o[0]}" ${c.kind===o[0]?"selected":""}>${o[1]}</option>`).join("")+`</select>`;
+  let sub="";
+  if(c.kind==="AREAS") sub=`<span class="lb">部門</span>`+deptSelect_("cDept","onCompDept",c.dept,true);
+  else if(c.kind==="STORE_DEPTS") sub=`<span class="lb">エリア</span>`+areaSelect_("cArea","onCompArea",c.area)+`<span class="lb">店舗</span>`+storeSelect_("cStore","onCompStore",c.area,c.store);
+  else sub=`<span class="lb">エリア</span>`+areaSelect_("cArea","onCompArea",c.area)+`<span class="lb">部門</span>`+deptSelect_("cDept","onCompDept",c.dept,true);
+  const chSel=`<select id="cChart" onchange="onCompChart(this.value)">`+compChartOptions_().map(o=>`<option value="${o[0]}" ${c.chart===o[0]?"selected":""}>${o[1]}</option>`).join("")+`</select>`;
+  return `<span class="lb">比較</span>${kindSel}${sub}<span class="lb">チャート</span>${chSel}`;
+}
+function renderDash_(){
+  S.view="dash";
+  if(!S.comp.area) S.comp.area=S.area||(S.meta.areas[0]||{}).name||"";
+  const modeSeg=`<span class="modeseg">`+[["総合","総合分析"],["比較","比較・内訳"],["予算","予算対比"]].map(m=>`<button class="${S.mode===m[0]?'on':''}" onclick="onMode('${m[0]}')">${m[1]}</button>`).join("")+`</span>`;
+  const subSeg=(S.mode!=="予算")?`<span class="modeseg">`+["通常","前年対比"].map(m=>`<button class="${S.sub===m?'on':''}" onclick="onSub('${m}')">${m}</button>`).join("")+`</span>`:"";
+  let filters="";
+  if(S.mode==="比較") filters=compFilters_();
+  else filters=`<span class="lb">エリア</span>`+areaSelect_("fArea","onArea",S.area)+
+    `<span class="lb">店舗</span><select id="fScope" onchange="onScope(this.value)"><option value="AREA" ${S.scope==="AREA"?"selected":""}>エリア合計</option>`+
+    storesOfArea_(S.area).map(s=>`<option value="${esc(s.slug)}" ${s.slug===S.scope?"selected":""}>${esc(s.store_name)}</option>`).join("")+`</select>`+
+    `<span class="lb">部門</span>`+deptSelect_("fDept","onDept",S.dept,true);
+  $("app").innerHTML=
+    demoBanner_()+
+    `<div style="margin-bottom:4px"><h2 class="title">部門損益 可視化</h2><p class="subtitle">${modeDesc_()}</p></div>`+
+    `<div class="selbar">${modeSeg}${subSeg}<span style="border-left:1px solid var(--border);height:22px"></span>${filters}`+
+    `<button class="btn" style="margin-left:auto" onclick="reopenWizard_()" title="ウィザードで選び直す">🧭 最初から選び直す</button>`+
+    (S.isAdmin?`<button class="admin-btn" onclick="renderDataManage_()" title="Excelの取込（管理者向け）">⚙️ データ管理</button>`:``)+
     `</div>`+
     `<div id="scopechips" class="scopechips"></div>`+
     `<div id="chartwrap"><div class="note">読み込み中…</div></div>`;
+  runMode_();
 }
-function onArea(v){ S.area=v; const sts=storesOfArea_(v); if(S.scope!=="AREA"&&!sts.some(s=>s.slug===S.scope)) S.scope="AREA"; renderApp_(); loadAndRender_(); }
-function onScope(v){ S.scope=v; loadAndRender_(); }
-function onDept(v){ S.dept=v; loadAndRender_(); }
-function onMode(v){ S.mode=v; renderApp_(); renderChart_(); }
-
-async function loadAndRender_(){
-  const w=$("chartwrap"); if(w) w.innerHTML=`<div class="note">読み込み中…</div>`;
-  const fname=`series/${aslug_(S.area)}__${dslug_(S.dept)}__${S.scope}.json`;
-  try{ S.series = await loadJson(fname); }
-  catch(e){ if(w) w.innerHTML=`<div class="note">この範囲のデータがありません（${esc(fname)}）。</div>`; return; }
-  renderChart_();
+function onMode(v){ S.mode=v; if(v==="予算") S.sub="通常"; renderDash_(); }
+function onSub(v){ S.sub=v; renderDash_(); }
+function onArea(v){ S.area=v; const sts=storesOfArea_(v); if(S.scope!=="AREA"&&!sts.some(s=>s.slug===S.scope)) S.scope="AREA"; renderDash_(); }
+function onScope(v){ S.scope=v; renderDash_(); }
+function onDept(v){ S.dept=v; renderDash_(); }
+function onCompKind(v){ S.comp.kind=v; renderDash_(); }
+function onCompArea(v){ S.comp.area=v; S.comp.store=""; renderDash_(); }
+function onCompStore(v){ S.comp.store=v; renderDash_(); }
+function onCompDept(v){ S.comp.dept=v; renderDash_(); }
+function onCompChart(v){ S.comp.chart=v; renderDash_(); }
+async function runMode_(){
+  if(S.mode==="総合") await runDeep_();
+  else if(S.mode==="比較") await runComp_();
+  else await runBudget_();
 }
 
 /* ── スコープチップ ── */
@@ -217,46 +302,142 @@ function scopeLabel_(){
   return { area:S.area, store:st, dept:(S.dept==="ALL"?"合計（全部門）":S.dept) };
 }
 function renderScopeChips_(){
-  const c=$("scopechips"); if(!c) return; const l=scopeLabel_();
-  c.innerHTML=`<span class="chip a">${esc(l.area)}</span><span class="chip s">${esc(l.store)}</span><span class="chip d">${esc(l.dept)}</span>`+
-    (S.meta.generated_at?`<span class="chip">データ更新: ${esc(S.meta.generated_at)}</span>`:"");
+  const c=$("scopechips"); if(!c) return;
+  let chips="";
+  if(S.mode==="比較"){
+    const k=S.comp.kind, l=[];
+    if(k==="AREAS"){ l.push(["a","全エリア比較"],["d",S.comp.dept==="ALL"?"合計（全部門）":S.comp.dept]); }
+    else if(k==="STORE_DEPTS"){ const st=storesOfArea_(S.comp.area).find(s=>s.slug===S.comp.store); l.push(["a",S.comp.area],["s",(st||{}).store_name||""],["d","部門内訳"]); }
+    else { l.push(["a",S.comp.area+"（店舗比較）"],["d",S.comp.dept==="ALL"?"合計（全部門）":S.comp.dept]); }
+    chips=l.map(x=>`<span class="chip ${x[0]}">${esc(x[1])}</span>`).join("");
+  } else {
+    const l=scopeLabel_();
+    chips=`<span class="chip a">${esc(l.area)}</span><span class="chip s">${esc(l.store)}</span><span class="chip d">${esc(l.dept)}</span>`;
+  }
+  c.innerHTML=chips+(S.meta.generated_at?`<span class="chip">データ更新: ${esc(S.meta.generated_at)}</span>`:"");
 }
 
 /* ── v1 チャート（自前SVG: 売上・粗利=棒／粗利率=折線／前年ゴースト） ── */
 function fmtK(v){ return Math.round(v).toLocaleString(); }
 function niceMax(v){ if(v<=0)return 1; const e=Math.pow(10,Math.floor(Math.log10(v))); const f=v/e; const n=f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10; return n*e; }
 function prevYm_(ym){ return (parseInt(ym.slice(0,4),10)-1)+ym.slice(4); }
-function renderChart_(){
-  const w=$("chartwrap"); if(!w||!S.series) return;
-  renderScopeChips_();
-  const all=S.series.months||[];
-  if(!all.length){ w.innerHTML=`<div class="note">データがありません。</div>`; return; }
-  const yoy=(S.mode==="前年対比");
+function windowRows_(all, yoy){
   const byYm={}; all.forEach(r=>byYm[r.ym]=r);
   // 通常＝最新から24ヶ月／前年対比＝前年同月データがある月だけを最新から最大12ヶ月（＝同月対比）
   const disp = yoy ? all.filter(r=>byYm[prevYm_(r.ym)]).slice(-12)
                    : all.slice(-Math.min(S.meta.display_months||24, all.length));
-  const dispN=disp.length;
-  const rows=disp.map(r=>({ ...r, prev: byYm[prevYm_(r.ym)]||null }));
-  if(yoy && !dispN){ w.innerHTML=`<div class="note">前年対比に必要な前年同月データがありません（このデモの実データは直近15ヶ月のみ）。</div>`; return; }
-  const card=(title,sub,svg)=>`<div class="chartcard"><div class="chead"><b>${title}</b><span class="lb">${sub}</span></div>${svg}</div>`;
-  w.innerHTML=
-    (yoy?card("累計（年度）", `年度開始4月からの累計（実線=当年・破線=前年）`, svgYTD_(all)):"")+
-    card("① 売上・粗利・粗利率", `直近${dispN}ヶ月${yoy?"／前年対比（灰=前年・濃=前年超/淡=前年割れ）":""}・金額=千円`, svgSalesMargin_(rows,yoy))+
-    card("② ロス管理（廃棄・値引）", `積み上げ棒＝金額／折線＝率（右軸）`, svgLoss_(rows))+
-    card("③ 経費構造推移（販管費内訳）", `積み上げ棒・金額=千円`, svgCostBreakdown_(rows))+
-    card("④ 利益構造", `${S.dept==="ALL"?"営業利益（黒字=橙・赤字=青）":"貢献利益（配賦前 vs 配賦後・横並び）"}`, svgProfit_(rows,S.dept))+
-    card("⑤ 労働生産性", `人時売上（青）・人時生産性（緑）・円/人時`, svgProductivity_(rows));
+  return disp.map(r=>({ ...r, prev: byYm[prevYm_(r.ym)]||null }));
+}
+function card_(title,sub,svg){ return `<div class="chartcard"><div class="chead"><b>${title}</b><span class="lb">${sub}</span></div>${svg}</div>`; }
+
+/* ── 総合分析（Deep Dive: 1対象×5指標の縦積み） ── */
+async function runDeep_(){
+  const w=$("chartwrap"); if(w) w.innerHTML=`<div class="note">読み込み中…</div>`;
+  const fname=`series/${aslug_(S.area)}__${dslug_(S.dept)}__${S.scope}.json`;
+  try{ S.series = await loadJson(fname); }
+  catch(e){ if(w) w.innerHTML=`<div class="note">この範囲のデータがありません（${esc(fname)}）。</div>`; return; }
+  renderDeepCharts_();
+}
+function renderDeepCharts_(){
+  const w=$("chartwrap"); if(!w||!S.series) return;
+  renderScopeChips_();
+  const all=S.series.months||[];
+  if(!all.length){ w.innerHTML=`<div class="note">データがありません。</div>`; return; }
+  const yoy=(S.sub==="前年対比");
+  const rows=windowRows_(all,yoy);
+  if(yoy && !rows.length){ w.innerHTML=`<div class="note">前年対比に必要な前年同月データがありません。</div>`; return; }
+  const dispN=rows.length;
+  let html=
+    (yoy?card_("累計（年度）", `年度開始4月からの累計（実線=当年・破線=前年）`, svgYTD_(all)):"")+
+    card_("① 売上・粗利・粗利率", `直近${dispN}ヶ月${yoy?"／前年対比（灰=前年・濃=前年超/淡=前年割れ）":""}・金額=千円`, svgSalesMargin_(rows,yoy))+
+    card_("② ロス管理（廃棄・値引）", yoy?`前年=灰／当年=改善100%・悪化30%／折線=改善pt（右軸・＋が改善）`:`積み上げ棒＝金額／折線＝率（右軸）`, svgLoss_(rows,yoy));
+  if(yoy){ svgCostYoY6_(rows).forEach(c=>{ html+=card_(c.title, `前年=灰／当年=改善(費用減)100%・悪化40%・金額=千円`, c.svg); }); }
+  else html+=card_("③ 経費構造推移（販管費内訳）", `積み上げ棒・金額=千円`, svgCostBreakdown_(rows));
+  html+=
+    card_("④ 利益構造", `${S.dept==="ALL"?"営業利益（黒字=橙・赤字=青）":"貢献利益（配賦前 vs 配賦後・横並び）"}${yoy?"／前年=灰・改善100%/悪化30%":""}`, svgProfit_(rows,S.dept,yoy))+
+    card_("⑤ 労働生産性", `人時売上（青）・人時生産性（緑）・円/人時${yoy?"／前年=灰・改善100%/悪化30%":""}`, svgProductivity_(rows,yoy));
+  w.innerHTML=html;
+}
+
+/* ── 比較・内訳（Comparison: 複数対象×1指標の縦並び） ── */
+const SGA_DEF={ "③-0":["sga_total","販管費計","#8c564b"], "③-1":["sga_personnel","人件費","#1f77b4"], "③-2":["sga_selling","販売費","#ff7f0e"], "③-3":["sga_admin_a","管理費A","#bcbd22"], "③-4":["sga_admin_b","管理費B","#2ca02c"], "③-5":["sga_depreciation","減価償却費","#9467bd"] };
+function compChartOptions_(){
+  const yoy=(S.sub==="前年対比");
+  const o=[["①","① 売上・粗利・粗利率"],["②","② ロス管理"]];
+  if(!yoy) o.push(["③","③ 販管費内訳（全体）"]);   // 原本準拠: 前年対比では全体積み上げは非表示（個別のみ）
+  o.push(["③-0","③-0 販管費計"],["③-1","③-1 人件費"],["③-2","③-2 販売費"],["③-3","③-3 管理費A"],["③-4","③-4 管理費B"],["③-5","③-5 減価償却費"],["④","④ 利益構造"],["⑤","⑤ 労働生産性"]);
+  return o;
+}
+function compChartLabel_(){ const x=compChartOptions_().find(a=>a[0]===S.comp.chart); return x?x[1]:S.comp.chart; }
+function chartFor_(key,rows,yoy,dept){
+  if(key==="①") return svgSalesMargin_(rows,yoy);
+  if(key==="②") return svgLoss_(rows,yoy);
+  if(key==="③") return svgCostBreakdown_(rows);
+  if(SGA_DEF[key]){ const d=SGA_DEF[key]; return svgCostSingle_(rows,d[0],d[1],d[2],yoy); }
+  if(key==="④") return svgProfit_(rows,dept,yoy);
+  return svgProductivity_(rows,yoy);
+}
+async function runComp_(){
+  const w=$("chartwrap"); if(!w) return;
+  const c=S.comp;
+  if(!compChartOptions_().some(o=>o[0]===c.chart)) c.chart="①";   // 前年対比で③全体が消えた時の受け皿
+  let targets=[];
+  if(c.kind==="AREAS"){
+    targets=S.meta.areas.map(a=>({label:`${a.name}（エリア合計）`, file:`series/${a.slug}__${c.dept==="ALL"?"ALL":dslug_(c.dept)}__AREA.json`, dept:c.dept}));
+  } else if(c.kind==="STORE_DEPTS"){
+    const sts=storesOfArea_(c.area); const st=sts.find(s=>s.slug===c.store)||sts[0];
+    if(!st){ w.innerHTML=`<div class="note">このエリアに店舗がありません。</div>`; return; }
+    c.store=st.slug;
+    targets=[{label:`${st.store_name}｜合計（全部門）`, file:`series/${aslug_(c.area)}__ALL__${st.slug}.json`, dept:"ALL"}]
+      .concat(S.meta.depts.map(d=>({label:`${st.store_name}｜${d.name}`, file:`series/${aslug_(c.area)}__${d.slug}__${st.slug}.json`, dept:d.name})));
+  } else {
+    targets=[{label:`${c.area}（エリア合計）`, file:`series/${aslug_(c.area)}__${c.dept==="ALL"?"ALL":dslug_(c.dept)}__AREA.json`, dept:c.dept}]
+      .concat(storesOfArea_(c.area).map(s=>({label:s.store_name, file:`series/${aslug_(c.area)}__${c.dept==="ALL"?"ALL":dslug_(c.dept)}__${s.slug}.json`, dept:c.dept})));
+  }
+  w.innerHTML=`<div class="note">読み込み中…（${targets.length}件）</div>`;
+  const yoy=(S.sub==="前年対比");
+  const results=await Promise.all(targets.map(async t=>{ try{ return {t, s:await loadJson(t.file)}; }catch(e){ return {t, s:null}; } }));
+  const cards=[];
+  for(const x of results){
+    if(!x.s||!(x.s.months||[]).length) continue;          // 欠測範囲は表示しない（行欠落=可視化なし）
+    const rows=windowRows_(x.s.months,yoy);
+    if(!rows.length) continue;
+    cards.push(card_(esc(x.t.label), `${esc(compChartLabel_())}・${yoy?"前年対比"+rows.length+"ヶ月":"直近"+rows.length+"ヶ月"}`, chartFor_(c.chart,rows,yoy,x.t.dept)));
+  }
+  renderScopeChips_();
+  w.innerHTML = cards.length?cards.join(""):`<div class="note">この条件で表示できるデータがありません。</div>`;
+}
+
+/* ── 予算対比（Budget vs Actual: 12ヶ月窓。予算未取込なら案内） ── */
+async function runBudget_(){
+  const w=$("chartwrap"); if(w) w.innerHTML=`<div class="note">読み込み中…</div>`;
+  const fname=`series/${aslug_(S.area)}__${dslug_(S.dept)}__${S.scope}.json`;
+  try{ S.series = await loadJson(fname); }
+  catch(e){ if(w) w.innerHTML=`<div class="note">この範囲のデータがありません（${esc(fname)}）。</div>`; return; }
+  renderScopeChips_();
+  const all=S.series.months||[];
+  const hasBudget=all.some(r=>(r.budget_sales||0)>0||(r.budget_gross_profit||0)>0);
+  if(!hasBudget){
+    w.innerHTML=`<div class="chartcard" style="max-width:720px"><div class="chead"><b>予算対比</b></div>`+
+      `<div class="note" style="padding:8px 2px">この範囲の<b>予算データが未取込</b>のため、予算対比はまだ表示できません。<br>`+
+      `年度予算Excelの取込（⚙️ データ管理 → ② 年度予算Excel）と本部側の処理が完了すると、`+
+      `実績vs予算（灰=予算・達成=濃・未達=淡）と粗利率差pt（緑=改善・赤=悪化）をここに表示します。</div></div>`;
+    return;
+  }
+  const rows=all.slice(-12);
+  w.innerHTML=card_("予算対比（実績 vs 予算）", `直近${rows.length}ヶ月・灰=予算／実績=達成100%・未達40%／折線=粗利率差pt（右軸・緑=改善/赤=悪化）`, svgBudget_(rows));
 }
 function chartBase_(rows, o){
   const W=1000,H=430,mL=68,mR=(o.maxRight!=null?62:24),mT=10,mB=58;
   const x0=mL,x1=W-mR,y0=mT,y1=H-mB,pw=x1-x0,ph=y1-y0,n=rows.length,bw=pw/n;
-  const maxL=niceMax(o.maxLeft||1), maxR=(o.maxRight!=null)?niceMax(o.maxRight||0.1):null;
-  const yL=v=>y1-(v/maxL)*ph, yR=v=>maxR?y1-(v/maxR)*ph:0, cx=i=>x0+bw*(i+0.5);
+  // minLeft を渡すと符号付き軸（0線あり）。未指定＝従来どおり 0 起点
+  const maxL=niceMax(o.maxLeft||1), minL=(o.minLeft<0)?-niceMax(-o.minLeft):0;
+  const maxR=(o.maxRight!=null)?niceMax(o.maxRight||0.1):null;
+  const yL=v=>y1-((v-minL)/(maxL-minL))*ph, yR=v=>maxR?y1-(v/maxR)*ph:0, cx=i=>x0+bw*(i+0.5);
   let g=""; const T=4;
-  for(let t=0;t<=T;t++){ const y=yL(maxL*t/T);
-    g+=`<line x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}" stroke="#eef2f7"/>`;
-    g+=`<text x="${x0-6}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="10" fill="#94a3b8">${fmtK(maxL*t/T)}</text>`;
+  for(let t=0;t<=T;t++){ const val=minL+(maxL-minL)*t/T, y=yL(val);
+    g+=`<line x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}" stroke="${(minL<0&&Math.abs(val)<1e-9)?'#cbd5e1':'#eef2f7'}"/>`;
+    g+=`<text x="${x0-6}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="10" fill="#94a3b8">${fmtK(val)}</text>`;
     if(maxR!=null) g+=`<text x="${x1+6}" y="${(yR(maxR*t/T)+3).toFixed(1)}" text-anchor="start" font-size="10" fill="#94a3b8">${o.rightPct?(maxR*t/T*100).toFixed(1)+"%":fmtK(maxR*t/T)}</text>`;
   }
   const midY=(y0+ph/2).toFixed(1);
@@ -265,18 +446,21 @@ function chartBase_(rows, o){
   rows.forEach((r,i)=>{ if(i%2===0||i===n-1){ const c=cx(i), lab=`${r.ym.slice(2,4)}/${r.ym.slice(4)}`;
     g+=`<text x="${c.toFixed(1)}" y="${(y1+13).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b" transform="rotate(-60 ${c.toFixed(1)} ${(y1+13).toFixed(1)})">${lab}</text>`; }});
   g+=`<line x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}" stroke="#cbd5e1"/>`;
-  return {frame:g, yL, yR, cx, x0, x1, y1, bw, W, H, n};
+  return {frame:g, yL, yR, cx, x0, x1, y1, yz:yL(0), bw, W, H, n};
 }
 function legendSvg_(items, x0, W){ let lx=x0,lg=""; items.forEach(a=>{ lg+=`<rect x="${lx}" y="0" width="11" height="11" rx="2" fill="${a[0]}"/><text x="${lx+15}" y="9.5" font-size="11" fill="#334155">${a[1]}</text>`; lx+=15+a[1].length*13+16; }); return `<svg viewBox="0 0 ${W} 14" style="width:100%;height:16px" role="img">${lg}</svg>`; }
 function svgWrap_(b, body){ return `<svg viewBox="0 0 ${b.W} ${b.H}" style="width:100%;height:auto" role="img">${b.frame}${body}</svg>`; }
 
 function svgSalesMargin_(rows, yoy){
   const C={sales:"#1f77b4",gp:"#ff7f0e",rate:"#d62728",g1:"#d9d9d9",g2:"#b0b0b0",rateP:"#999999"};
-  let maxAmt=0,maxRate=0;
-  rows.forEach(r=>{ maxAmt=Math.max(maxAmt,r.sales,(yoy&&r.prev)?r.prev.sales:0); maxRate=Math.max(maxRate,r.gross_profit_rate,(yoy&&r.prev)?r.prev.gross_profit_rate:0); });
-  const b=chartBase_(rows,{maxLeft:maxAmt,maxRight:maxRate*1.08,rightPct:true,leftTitle:"金額(千円)",rightTitle:"粗利率"});
+  let maxAmt=0,maxRate=0,minAmt=0;
+  rows.forEach(r=>{ maxAmt=Math.max(maxAmt,r.sales,(yoy&&r.prev)?r.prev.sales:0); maxRate=Math.max(maxRate,r.gross_profit_rate,(yoy&&r.prev)?r.prev.gross_profit_rate:0);
+    minAmt=Math.min(minAmt,r.sales||0,r.gross_profit||0,(yoy&&r.prev)?Math.min(r.prev.sales||0,r.prev.gross_profit||0):0); });
+  const b=chartBase_(rows,{maxLeft:maxAmt,minLeft:minAmt,maxRight:maxRate*1.08,rightPct:true,leftTitle:"金額(千円)",rightTitle:"粗利率"});
   let g=""; const bw=b.bw;
-  const rect=(x,w,val,fill,op,tip)=>`<rect x="${x.toFixed(1)}" y="${b.yL(val).toFixed(1)}" width="${w.toFixed(1)}" height="${(b.y1-b.yL(val)).toFixed(1)}" fill="${fill}" opacity="${op}"><title>${tip}</title></rect>`;
+  // 他共通など粗利が負になる範囲があるため、0線を基準に高さを取る（負は下向き＝負高さを作らない）
+  const rect=(x,w,val,fill,op,tip)=>{ const yv=b.yL(val), base=b.yL(0), top=Math.min(yv,base), h=Math.max(0.5,Math.abs(base-yv));
+    return `<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" opacity="${op}"><title>${tip}</title></rect>`; };
   rows.forEach((r,i)=>{ const c=b.cx(i);
     if(yoy&&r.prev){
       const gw=Math.max(4,bw*0.62), cw=Math.max(3,bw*0.44), gx=c-gw/2, cx2=c-cw/2;
@@ -298,8 +482,9 @@ function svgSalesMargin_(rows, yoy){
   const leg=[[C.sales,"売上"],[C.gp,"粗利"],[C.rate,"粗利率(右軸)"]].concat(yoy?[[C.g2,"前年(灰)"]]:[]);
   return legendSvg_(leg,b.x0,b.W)+svgWrap_(b,g);
 }
-function svgLoss_(rows){
+function svgLoss_(rows, yoy){
   const C={waste:"#d62728",disc:"#C71585",loss:"#FFAB00"};
+  if(yoy) return svgLossYoY_(rows,C);
   let maxAmt=0,maxRate=0;
   rows.forEach(r=>{ maxAmt=Math.max(maxAmt,(r.waste_amount||0)+(r.discount_amount||0)); maxRate=Math.max(maxRate,(r.waste_rate||0)+(r.discount_rate||0)); });
   const b=chartBase_(rows,{maxLeft:maxAmt,maxRight:maxRate*1.12,rightPct:true,leftTitle:"金額(千円)",rightTitle:"率"});
@@ -311,6 +496,105 @@ function svgLoss_(rows){
   const line=(fn,col)=>{ const pts=rows.map((r,i)=>`${b.cx(i).toFixed(1)},${b.yR(fn(r)).toFixed(1)}`).join(" "); let s=`<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" opacity="0.85"/>`; rows.forEach((r,i)=>{ s+=`<circle cx="${b.cx(i).toFixed(1)}" cy="${b.yR(fn(r)).toFixed(1)}" r="2.5" fill="${col}"/>`; }); return s; };
   g+=line(r=>r.waste_rate||0,C.waste)+line(r=>r.discount_rate||0,C.disc)+line(r=>(r.waste_rate||0)+(r.discount_rate||0),C.loss);
   return legendSvg_([[C.waste,"廃棄"],[C.disc,"値引"],[C.loss,"ロス率(計)"]],b.x0,b.W)+svgWrap_(b,g);
+}
+/* 符号付き軸の枠（実データは減価償却の戻し等で負値が入る。0線を基準に上下へ描く） */
+function chartBaseSigned_(rows, vals, leftTitle){
+  const W=1000,H=430,mL=68,mR=24,mT=10,mB=58,x0=mL,x1=W-mR,y0=mT,y1=H-mB,ph=y1-y0,n=rows.length,bw=(x1-x0)/n;
+  let mn=Math.min(0,...vals), mx=Math.max(0,...vals);
+  mx=mx>0?niceMax(mx):1; mn=mn<0?-niceMax(-mn):0;
+  const yL=v=>y1-((v-mn)/(mx-mn))*ph, cx=i=>x0+bw*(i+0.5), yz=yL(0);
+  let g=""; const T=4;
+  for(let t=0;t<=T;t++){ const val=mn+(mx-mn)*t/T,y=yL(val);
+    g+=`<line x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}" stroke="${Math.abs(val)<1e-9?'#cbd5e1':'#eef2f7'}"/><text x="${x0-6}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="10" fill="#94a3b8">${fmtK(val)}</text>`; }
+  g+=`<text x="16" y="${(y0+ph/2).toFixed(1)}" transform="rotate(-90 16 ${(y0+ph/2).toFixed(1)})" text-anchor="middle" font-size="11" fill="#64748b">${esc(leftTitle||"金額(千円)")}</text>`;
+  rows.forEach((r,i)=>{ if(i%2===0||i===n-1){ const c=cx(i);
+    g+=`<text x="${c.toFixed(1)}" y="${(y1+13).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b" transform="rotate(-60 ${c.toFixed(1)} ${(y1+13).toFixed(1)})">${r.ym.slice(2,4)}/${r.ym.slice(4)}</text>`; }});
+  return {frame:g, yL, cx, x0, x1, y1, yz, bw, W, H, n};
+}
+/* YoY共通: 前年ゴースト＋当年（改善=不透明/悪化=淡）の横並び棒。原本 charts.py の濃淡ルール準拠。負値は0線から下へ */
+function yoyPairBars_(b, rows, defs){
+  let g="";
+  const n=defs.length, gw=Math.max(3,b.bw*0.62/n), cw=Math.max(3,b.bw*0.46/n), span=b.bw*0.7;
+  const base=(b.yz!=null)?b.yz:b.y1;
+  const bar=(x,w,v,fill,op,tip)=>{ const yv=b.yL(v), top=Math.min(yv,base), h=Math.max(0.5,Math.abs(base-yv));
+    return `<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" opacity="${op}"><title>${tip}</title></rect>`; };
+  rows.forEach((r,i)=>{
+    const c=b.cx(i);
+    defs.forEach((d,k)=>{
+      const off=(n===1)?0:(-span/2+span*k/(n-1));
+      const cur=d.get(r)||0, prv=r.prev?(d.get(r.prev)||0):null;
+      if(prv!=null) g+=bar(c+off-gw/2,gw,prv,"#cccccc",0.5,`前年 ${d.label} ${fmtK(prv)}`);
+      const good = (prv==null)?true:(d.lowerBetter ? cur<prv : cur>=prv);
+      g+=bar(c+off-cw/2,cw,cur,d.color,good?1:0.3,`${r.ym} ${d.label} ${fmtK(cur)}${prv!=null?`（前年 ${fmtK(prv)}）`:""}`);
+    });
+  });
+  return g;
+}
+/* ② ロス管理（前年対比）: 廃棄・値引の前年比＋改善pt折線（＋が改善=緑／−が悪化=赤） */
+function svgLossYoY_(rows, C){
+  let maxAmt=0, maxPt=0;
+  rows.forEach(r=>{
+    maxAmt=Math.max(maxAmt,r.waste_amount||0,r.discount_amount||0,r.prev?(r.prev.waste_amount||0):0,r.prev?(r.prev.discount_amount||0):0);
+    if(r.prev){ maxPt=Math.max(maxPt, Math.abs(((r.prev.waste_rate||0)-(r.waste_rate||0))*100), Math.abs(((r.prev.discount_rate||0)-(r.discount_rate||0))*100)); }
+  });
+  const b=chartBase_(rows,{maxLeft:maxAmt,maxRight:(maxPt||1)*1.1,leftTitle:"金額(千円)",rightTitle:"改善pt"});
+  let g=yoyPairBars_(b,rows,[
+    {get:r=>r.waste_amount,    label:"廃棄額", color:C.waste, lowerBetter:true},
+    {get:r=>r.discount_amount, label:"値引額", color:C.disc,  lowerBetter:true}
+  ]);
+  // 改善pt（前年率 − 当年率）: 0線を挟んで±。右軸は±maxPtの対称スケールに読み替える
+  const yPt=v=>{ const mx=niceMax((maxPt||1)*1.1); const ph=(b.y1-10); return b.y1-((v+mx)/(2*mx))*ph; };
+  const zero=yPt(0);
+  g+=`<line x1="${b.x0}" y1="${zero.toFixed(1)}" x2="${b.x1}" y2="${zero.toFixed(1)}" stroke="#94a3b8" stroke-dasharray="4 4"/>`;
+  const ptLine=(fn,col)=>{ const pts=rows.map((r,i)=>r.prev?`${b.cx(i).toFixed(1)},${yPt(fn(r)).toFixed(1)}`:null).filter(Boolean).join(" ");
+    let s=`<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" opacity="0.8"/>`;
+    rows.forEach((r,i)=>{ if(!r.prev)return; const v=fn(r); s+=`<circle cx="${b.cx(i).toFixed(1)}" cy="${yPt(v).toFixed(1)}" r="3" fill="${v>0?'#15803d':'#dc2626'}"><title>${r.ym} 改善 ${v.toFixed(2)}pt</title></circle>`; });
+    return s; };
+  g+=ptLine(r=>((r.prev.waste_rate||0)-(r.waste_rate||0))*100, C.waste);
+  g+=ptLine(r=>((r.prev.discount_rate||0)-(r.discount_rate||0))*100, C.disc);
+  return legendSvg_([[C.waste,"廃棄"],[C.disc,"値引"],["#cccccc","前年"],["#15803d","改善pt(＋)"]],b.x0,b.W)+svgWrap_(b,g);
+}
+/* ③ 前年対比: 販管費を6分割（原本 chart_cost_breakdown_yoy_detailed 準拠・費用は減が改善） */
+function svgCostYoY6_(rows){
+  const items=[["sga_total","販管費計","#8c564b","③-0"],["sga_personnel","人件費","#1f77b4","③-1"],["sga_selling","販売費","#ff7f0e","③-2"],
+               ["sga_admin_a","管理費A","#bcbd22","③-3"],["sga_admin_b","管理費B","#2ca02c","③-4"],["sga_depreciation","減価償却費","#9467bd","③-5"]];
+  return items.map(it=>({ title:`${it[3]} [前年比] ${it[1]}`, svg:svgCostSingle_(rows,it[0],it[1],it[2],true) }));
+}
+/* ③個別費目（通常=単色棒／前年対比=ゴースト＋濃淡） */
+function svgCostSingle_(rows, key, label, color, yoy){
+  const vals=[]; rows.forEach(r=>{ vals.push(r[key]||0); if(yoy&&r.prev) vals.push(r.prev[key]||0); });
+  const b=chartBaseSigned_(rows,vals,"金額(千円)");   // 減価償却の戻し等で負値になり得る＝符号付き軸
+  let g;
+  if(yoy) g=yoyPairBars_(b,rows,[{get:r=>r[key], label:label, color:color, lowerBetter:true}]);
+  else { g=""; const w=Math.max(4,b.bw*0.6);
+    rows.forEach((r,i)=>{ const v=r[key]||0, yv=b.yL(v), top=Math.min(yv,b.yz), h=Math.max(0.5,Math.abs(b.yz-yv));
+      g+=`<rect x="${(b.cx(i)-w/2).toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${color}" opacity="0.85"><title>${r.ym} ${label} ${fmtK(v)}</title></rect>`; });
+  }
+  return legendSvg_(yoy?[[color,label],["#cccccc","前年"]]:[[color,label]],b.x0,b.W)+svgWrap_(b,g);
+}
+/* 予算対比: 灰=予算／実績=達成100%・未達40%＋粗利率差pt折線 */
+function svgBudget_(rows){
+  const C={sales:"#1f77b4",gp:"#ff7f0e"};
+  let maxAmt=0,maxPt=0;
+  rows.forEach(r=>{ maxAmt=Math.max(maxAmt,r.sales||0,r.budget_sales||0,r.gross_profit||0,r.budget_gross_profit||0);
+    maxPt=Math.max(maxPt,Math.abs(((r.gross_profit_rate||0)-(r.budget_gross_profit_rate||0))*100)); });
+  const b=chartBase_(rows,{maxLeft:maxAmt,maxRight:(maxPt||1)*1.1,leftTitle:"金額(千円)",rightTitle:"粗利率差(pt)"});
+  const defs=[{a:"sales",bud:"budget_sales",label:"売上",color:C.sales},{a:"gross_profit",bud:"budget_gross_profit",label:"粗利",color:C.gp}];
+  let g=""; const n=defs.length, gw=Math.max(3,b.bw*0.60/n), cw=Math.max(3,b.bw*0.44/n), span=b.bw*0.66;
+  rows.forEach((r,i)=>{ const c=b.cx(i);
+    defs.forEach((d,k)=>{ const off=(-span/2+span*k/(n-1)), cur=r[d.a]||0, bud=r[d.bud]||0;
+      if(bud) g+=`<rect x="${(c+off-gw/2).toFixed(1)}" y="${b.yL(bud).toFixed(1)}" width="${gw.toFixed(1)}" height="${(b.y1-b.yL(bud)).toFixed(1)}" fill="#c0c0c0" opacity="0.45"><title>${r.ym} ${d.label}予算 ${fmtK(bud)}</title></rect>`;
+      const ok=(!bud)||cur>=bud;
+      g+=`<rect x="${(c+off-cw/2).toFixed(1)}" y="${b.yL(cur).toFixed(1)}" width="${cw.toFixed(1)}" height="${(b.y1-b.yL(cur)).toFixed(1)}" fill="${d.color}" opacity="${ok?1:0.4}"><title>${r.ym} ${d.label}実績 ${fmtK(cur)}${bud?`（達成率 ${(cur/bud*100).toFixed(1)}%）`:""}</title></rect>`;
+    });
+  });
+  const mx=niceMax((maxPt||1)*1.1), ph=(b.y1-10), yPt=v=>b.y1-((v+mx)/(2*mx))*ph, zero=yPt(0);
+  g+=`<line x1="${b.x0}" y1="${zero.toFixed(1)}" x2="${b.x1}" y2="${zero.toFixed(1)}" stroke="#94a3b8" stroke-dasharray="4 4"/>`;
+  const pts=rows.map((r,i)=>`${b.cx(i).toFixed(1)},${yPt(((r.gross_profit_rate||0)-(r.budget_gross_profit_rate||0))*100).toFixed(1)}`).join(" ");
+  g+=`<polyline points="${pts}" fill="none" stroke="#64748b" stroke-width="2" opacity="0.85"/>`;
+  rows.forEach((r,i)=>{ const v=((r.gross_profit_rate||0)-(r.budget_gross_profit_rate||0))*100;
+    g+=`<circle cx="${b.cx(i).toFixed(1)}" cy="${yPt(v).toFixed(1)}" r="3" fill="${v>=0?'#15803d':'#dc2626'}"><title>${r.ym} 粗利率差 ${v.toFixed(2)}pt</title></circle>`; });
+  return legendSvg_([[C.sales,"売上実績"],[C.gp,"粗利実績"],["#c0c0c0","予算"],["#15803d","粗利率差(＋改善)"]],b.x0,b.W)+svgWrap_(b,g);
 }
 function svgCostBreakdown_(rows){
   const comps=[["sga_personnel","人件費","#1f77b4"],["sga_selling","販売費","#ff7f0e"],["sga_admin_a","管理費A","#bcbd22"],["sga_admin_b","管理費B","#2ca02c"],["sga_depreciation","減価償却費","#9467bd"]];
@@ -335,9 +619,10 @@ function svgCostBreakdown_(rows){
   rows.forEach((r,i)=>{ if(i%2===0||i===n-1){ const c=cx(i); g+=`<text x="${c.toFixed(1)}" y="${(y1+13).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b" transform="rotate(-60 ${c.toFixed(1)} ${(y1+13).toFixed(1)})">${r.ym.slice(2,4)}/${r.ym.slice(4)}</text>`; }});
   return legendSvg_(comps.map(cp=>[cp[2],cp[1]]),x0,W)+`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img">${g}</svg>`;
 }
-function svgProfit_(rows, dept){
+function svgProfit_(rows, dept, yoy){
   const deptLevel=(dept!=="ALL");
-  const vals=[]; rows.forEach(r=>{ if(deptLevel){ vals.push(r.cont_profit_pre||0,r.cont_profit_post||0); } else vals.push(r.operating_profit||0); });
+  const vals=[]; rows.forEach(r=>{ if(deptLevel){ vals.push(r.cont_profit_pre||0,r.cont_profit_post||0); } else vals.push(r.operating_profit||0);
+    if(yoy&&r.prev){ if(deptLevel){ vals.push(r.prev.cont_profit_pre||0,r.prev.cont_profit_post||0); } else vals.push(r.prev.operating_profit||0); } });
   let mn=Math.min(0,...vals), mx=Math.max(0,...vals);
   mx=mx>0?niceMax(mx):1; mn=mn<0?-niceMax(-mn):0;
   const W=1000,H=430,mL=68,mR=24,mT=10,mB=58,x0=mL,x1=W-mR,y0=mT,y1=H-mB,ph=y1-y0,n=rows.length,bw=(x1-x0)/n;
@@ -345,15 +630,30 @@ function svgProfit_(rows, dept){
   let g=""; const T=4;
   for(let t=0;t<=T;t++){ const val=mn+(mx-mn)*t/T,y=yL(val); g+=`<line x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}" stroke="${Math.abs(val)<1e-9?'#cbd5e1':'#eef2f7'}"/><text x="${x0-6}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="10" fill="#94a3b8">${fmtK(val)}</text>`; }
   const bar=(x,w,v,fill,tip)=>{ const yv=yL(v),top=Math.min(yv,yz),h=Math.max(0.5,Math.abs(yz-yv)); return `<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" opacity="0.9"><title>${tip}</title></rect>`; };
+  const barOp=(x,w,v,fill,tip,op)=>{ const yv=yL(v),top=Math.min(yv,yz),h=Math.max(0.5,Math.abs(yz-yv)); return `<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" opacity="${op}"><title>${tip}</title></rect>`; };
   rows.forEach((r,i)=>{ const c=cx(i);
-    if(deptLevel){ const w=Math.max(3,bw*0.30), dx=bw*0.17;
-      g+=bar(c-dx-w/2,w,(r.cont_profit_pre||0),"#1f77b4",`${r.ym} 貢献利益 配賦前 ${fmtK(r.cont_profit_pre||0)}`);
-      g+=bar(c+dx-w/2,w,(r.cont_profit_post||0),"#17becf",`${r.ym} 貢献利益 配賦後 ${fmtK(r.cont_profit_post||0)}`);
-    } else { const w=Math.max(4,bw*0.6), v=r.operating_profit||0; g+=bar(c-w/2,w,v,(v>=0?"#ff7f0e":"#1f77b4"),`${r.ym} 営業利益 ${fmtK(v)}`); }
+    if(deptLevel){
+      if(yoy){ const gw=Math.max(3,bw*0.26), cw=Math.max(3,bw*0.20), dx=bw*0.18;
+        [[ "cont_profit_pre","貢献利益 配賦前","#1f77b4",-dx],["cont_profit_post","貢献利益 配賦後","#17becf",dx]].forEach(d=>{
+          const cur=r[d[0]]||0, prv=r.prev?(r.prev[d[0]]||0):null;
+          if(prv!=null) g+=barOp(c+d[3]-gw/2,gw,prv,"#cccccc",`前年 ${d[1]} ${fmtK(prv)}`,0.5);
+          g+=barOp(c+d[3]-cw/2,cw,cur,d[2],`${r.ym} ${d[1]} ${fmtK(cur)}${prv!=null?`（前年 ${fmtK(prv)}）`:""}`,(prv==null||cur>=prv)?1:0.3);
+        });
+      } else { const w=Math.max(3,bw*0.30), dx=bw*0.17;
+        g+=bar(c-dx-w/2,w,(r.cont_profit_pre||0),"#1f77b4",`${r.ym} 貢献利益 配賦前 ${fmtK(r.cont_profit_pre||0)}`);
+        g+=bar(c+dx-w/2,w,(r.cont_profit_post||0),"#17becf",`${r.ym} 貢献利益 配賦後 ${fmtK(r.cont_profit_post||0)}`);
+      }
+    } else { const v=r.operating_profit||0;
+      if(yoy){ const gw=Math.max(4,bw*0.56), cw=Math.max(3,bw*0.40), prv=r.prev?(r.prev.operating_profit||0):null;
+        if(prv!=null) g+=barOp(c-gw/2,gw,prv,"#cccccc",`前年 営業利益 ${fmtK(prv)}`,0.5);
+        g+=barOp(c-cw/2,cw,v,(v>=0?"#ff7f0e":"#1f77b4"),`${r.ym} 営業利益 ${fmtK(v)}${prv!=null?`（前年 ${fmtK(prv)}）`:""}`,(prv==null||v>=prv)?1:0.3);
+      } else { const w=Math.max(4,bw*0.6); g+=bar(c-w/2,w,v,(v>=0?"#ff7f0e":"#1f77b4"),`${r.ym} 営業利益 ${fmtK(v)}`); }
+    }
   });
   g+=`<text x="16" y="${(y0+ph/2).toFixed(1)}" transform="rotate(-90 16 ${(y0+ph/2).toFixed(1)})" text-anchor="middle" font-size="11" fill="#64748b">金額(千円)</text>`;
   rows.forEach((r,i)=>{ if(i%2===0||i===n-1){ const c=cx(i); g+=`<text x="${c.toFixed(1)}" y="${(y1+13).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b" transform="rotate(-60 ${c.toFixed(1)} ${(y1+13).toFixed(1)})">${r.ym.slice(2,4)}/${r.ym.slice(4)}</text>`; }});
-  const leg=deptLevel?[["#1f77b4","貢献利益(配賦前)"],["#17becf","貢献利益(配賦後)"]]:[["#ff7f0e","営業利益(黒字)"],["#1f77b4","営業利益(赤字)"]];
+  let leg=deptLevel?[["#1f77b4","貢献利益(配賦前)"],["#17becf","貢献利益(配賦後)"]]:[["#ff7f0e","営業利益(黒字)"],["#1f77b4","営業利益(赤字)"]];
+  if(yoy) leg=leg.concat([["#cccccc","前年"]]);
   return legendSvg_(leg,x0,W)+`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img">${g}</svg>`;
 }
 function svgYTD_(all){
@@ -378,13 +678,27 @@ function svgYTD_(all){
   let lx=x0,lg=""; leg.forEach(a=>{ lg+=`<rect x="${lx}" y="0" width="11" height="11" rx="2" fill="${a[0]}"/><text x="${lx+15}" y="9.5" font-size="11" fill="#334155">${a[1]}</text>`; lx+=15+a[1].length*13+16; });
   return `<svg viewBox="0 0 ${W} 14" style="width:100%;height:16px" role="img">${lg}</svg><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img">${g}</svg>`;
 }
-function svgProductivity_(rows){
-  let mx=0; rows.forEach(r=>{ mx=Math.max(mx,r.sales_per_man_hour||0,r.productivity_per_man_hour||0); });
-  const b=chartBase_(rows,{maxLeft:mx,leftTitle:"円/人時"});
-  let g=""; const w=Math.max(4,b.bw*0.6);
+function svgProductivity_(rows, yoy){
+  let mx=0,mn=0; rows.forEach(r=>{ mx=Math.max(mx,r.sales_per_man_hour||0,r.productivity_per_man_hour||0);
+    mn=Math.min(mn,r.sales_per_man_hour||0,r.productivity_per_man_hour||0);   // 他共通等は生産性が負になり得る
+    if(yoy&&r.prev){ mx=Math.max(mx,r.prev.sales_per_man_hour||0,r.prev.productivity_per_man_hour||0);
+      mn=Math.min(mn,r.prev.sales_per_man_hour||0,r.prev.productivity_per_man_hour||0); } });
+  const b=chartBase_(rows,{maxLeft:mx,minLeft:mn,leftTitle:"円/人時"});
+  const zeroY=b.yL(0);
+  let g;
+  if(yoy){
+    g=yoyPairBars_(b,rows,[
+      {get:r=>r.sales_per_man_hour,        label:"人時売上",   color:"#1f77b4", lowerBetter:false},
+      {get:r=>r.productivity_per_man_hour, label:"人時生産性", color:"#2ca02c", lowerBetter:false}
+    ]);
+    return legendSvg_([["#1f77b4","人時売上"],["#2ca02c","人時生産性"],["#cccccc","前年"]],b.x0,b.W)+svgWrap_(b,g);
+  }
+  g=""; const w=Math.max(4,b.bw*0.6);
+  const bar=(x,v,fill,tip)=>{ const yv=b.yL(v), top=Math.min(yv,zeroY), h=Math.max(0.5,Math.abs(zeroY-yv));
+    return `<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" opacity="0.85"><title>${tip}</title></rect>`; };
   rows.forEach((r,i)=>{ const x=b.cx(i)-w/2, s=r.sales_per_man_hour||0, p=r.productivity_per_man_hour||0;
-    g+=`<rect x="${x.toFixed(1)}" y="${b.yL(s).toFixed(1)}" width="${w.toFixed(1)}" height="${(b.y1-b.yL(s)).toFixed(1)}" fill="#1f77b4" opacity="0.85"><title>${r.ym} 人時売上 ${fmtK(s)}</title></rect>`;
-    g+=`<rect x="${x.toFixed(1)}" y="${b.yL(p).toFixed(1)}" width="${w.toFixed(1)}" height="${(b.y1-b.yL(p)).toFixed(1)}" fill="#2ca02c" opacity="0.85"><title>${r.ym} 人時生産性 ${fmtK(p)}</title></rect>`;
+    g+=bar(x,s,"#1f77b4",`${r.ym} 人時売上 ${fmtK(s)}`);
+    g+=bar(x,p,"#2ca02c",`${r.ym} 人時生産性 ${fmtK(p)}`);
   });
   return legendSvg_([["#1f77b4","人時売上"],["#2ca02c","人時生産性"]],b.x0,b.W)+svgWrap_(b,g);
 }
@@ -439,7 +753,7 @@ async function dmUpload_(){
   $("dmMsg").textContent = `${ok} 件アップロード完了${ng?`／${ng} 件失敗`:""}。本部側の取込（ETL→outbox）後に反映されます。`;
   S.upQ=S.upQ.filter(x=>!x.done); dmRenderQ_();
 }
-function backToViz_(){ renderApp_(); loadAndRender_(); }
+function backToViz_(){ renderDash_(); }
 
 function openGuide(){ alert("ご利用ガイドは準備中です。画面が整い次第、ヒッスルと同じ📖ガイドを搭載します。"); }
 

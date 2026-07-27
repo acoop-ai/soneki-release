@@ -105,7 +105,7 @@
 <body>
 <header>
   <span class="logo">AC</span>
-  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-27c</span></h1></div>
+  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-27d</span></h1></div>
   <span class="user" id="user"></span>
   <button class="btn ghelp" onclick="openGuide()" title="このシステムの使い方">📖 ご利用ガイド</button>
 </header>
@@ -120,7 +120,7 @@
 const IS_LOCAL = (location.hostname==="localhost"||location.hostname==="127.0.0.1"||location.protocol==="file:");
 const IS_GAS = !IS_LOCAL;
 const CONFIG = {
-  GAS_URL: "__SONEKI_GAS_EXEC_URL__",   // soneki-gas デプロイ後に /exec URL へ差し替え
+  GAS_URL: "https://script.google.com/macros/s/AKfycbwtA1LmZwtb2sef-R5XufrxiceE_i3tW6hk9BbhMfuzplX2wxyTiw3upKLDLZUGQbg/exec",   // soneki-gas デプロイ後に /exec URL へ差し替え
   GOOGLE_CLIENT_ID: "1072945615483-74jadmaet56chvhkfh2cpt4ae9dvh140.apps.googleusercontent.com", // Hissuru と共用（同一オリジン）
   ALLOWED_DOMAINS: ["jaz-acoop.co.jp","jaz-acoop1.jp","jaz-acoop2.jp","jaz-acoop3.jp"]
 };

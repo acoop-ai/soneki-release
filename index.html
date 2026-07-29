@@ -105,7 +105,7 @@
 <body>
 <header>
   <span class="logo">AC</span>
-  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-29b</span></h1></div>
+  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-29c</span></h1></div>
   <span class="user" id="user"></span>
   <button class="btn ghelp" onclick="openGuide()" title="このシステムの使い方">📖 ご利用ガイド</button>
 </header>
@@ -445,6 +445,15 @@ function chartFor_(key,rows,yoy,dept){
   if(key==="④")   return svgProfit_(rows,dept,yoy);                       // 旧キーの保険
   return svgProductivity_(rows,yoy);
 }
+/* 比較・内訳の前年対比: チャート種別→累計(YTD)系列の対応（総合分析と同じマッピング・PO指摘 2026-07-29） */
+function ytdSeriesFor_(key){
+  if(key==="①") return [{key:"sales",name:"売上",fill:"#1f77b4"},{key:"gross_profit",name:"粗利",fill:"#ff7f0e"}];
+  if(key==="②") return [{key:"waste_amount",name:"廃棄",fill:"#d62728",lowerBetter:true},{key:"discount_amount",name:"値引",fill:"#C71585",lowerBetter:true}];
+  if(SGA_DEF[key]){ const d=SGA_DEF[key]; return [{key:d[0],name:d[1],fill:d[2],lowerBetter:true}]; }
+  if(key==="④-1") return [{key:"operating_profit",name:"営業利益",fill:"#ff7f0e"}];
+  if(key==="④-2"||key==="④") return [{key:"cont_profit_pre",name:"配賦前",fill:"#1f77b4"},{key:"cont_profit_post",name:"配賦後",fill:"#17becf"}];
+  return [{key:"sales_per_man_hour",name:"人時売上",fill:"#1f77b4"},{key:"productivity_per_man_hour",name:"人時生産性",fill:"#2ca02c"}];
+}
 async function runComp_(){
   const w=$("chartwrap"); if(!w) return;
   const c=S.comp;
@@ -470,7 +479,9 @@ async function runComp_(){
     if(!x.s||!(x.s.months||[]).length) continue;          // 欠測範囲は表示しない（行欠落=可視化なし）
     const rows=windowRows_(x.s.months,yoy);
     if(!rows.length) continue;
-    cards.push(card_(esc(x.t.label), `${esc(compChartLabel_())}・${yoy?"前年対比"+rows.length+"ヶ月":"直近"+rows.length+"ヶ月"}`, chartFor_(c.chart,rows,yoy,x.t.dept)));
+    // 前年対比は総合分析と同じく右横に累計(YTD)を併記（基準月時点で締める）
+    const ytdSvg=yoy?ytdBars_(baseAll_(x.s.months||[]), ytdSeriesFor_(c.chart), "累計（年度）"):"";
+    cards.push(card_(esc(x.t.label), `${esc(compChartLabel_())}・${yoy?"前年対比"+rows.length+"ヶ月":"直近"+rows.length+"ヶ月"}`, withYtd_(chartFor_(c.chart,rows,yoy,x.t.dept), ytdSvg)));
   }
   renderScopeChips_();
   w.innerHTML = cards.length?cards.join(""):`<div class="note">この条件で表示できるデータがありません。</div>`;

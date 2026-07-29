@@ -105,7 +105,7 @@
 <body>
 <header>
   <span class="logo">AC</span>
-  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-27e</span></h1></div>
+  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-29a</span></h1></div>
   <span class="user" id="user"></span>
   <button class="btn ghelp" onclick="openGuide()" title="このシステムの使い方">📖 ご利用ガイド</button>
 </header>
@@ -483,7 +483,14 @@ async function runBudget_(){
     return;
   }
   const rows=all.slice(-12);
-  w.innerHTML=card_("予算対比（実績 vs 予算）", `直近${rows.length}ヶ月・灰=予算／実績=達成100%・未達40%／折線=粗利率差pt（右軸・緑=改善/赤=悪化）`, svgBudget_(rows));
+  w.innerHTML=card_("予算対比（実績 vs 予算）", `直近${rows.length}ヶ月・灰=予算／実績=達成100%・未達40%／折線=粗利率差pt（右軸・緑=改善/赤=悪化）／右=年度累計（実績 vs 予算）`, withYtd_(svgBudget_(rows), ytdBudgetBars_(all)));
+}
+/* 横軸の年月ラベル: 月は毎月表示・年（YY/）は先頭と1月のみ付す（PO要望 2026-07-29） */
+function xMonthTicks_(rows, cx, y1){
+  let g="";
+  rows.forEach((r,i)=>{ const c=cx(i), mm=r.ym.slice(4), lab=(i===0||mm==="01")?`${r.ym.slice(2,4)}/${mm}`:mm;
+    g+=`<text x="${c.toFixed(1)}" y="${(y1+13).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b" transform="rotate(-60 ${c.toFixed(1)} ${(y1+13).toFixed(1)})">${lab}</text>`; });
+  return g;
 }
 function chartBase_(rows, o){
   const W=1000,H=430,mL=68,mR=(o.maxRight!=null?62:24),mT=10,mB=58;
@@ -501,8 +508,7 @@ function chartBase_(rows, o){
   const midY=(y0+ph/2).toFixed(1);
   g+=`<text x="16" y="${midY}" transform="rotate(-90 16 ${midY})" text-anchor="middle" font-size="11" fill="#64748b">${esc(o.leftTitle||"金額(千円)")}</text>`;
   if(o.rightTitle) g+=`<text x="${W-14}" y="${midY}" transform="rotate(90 ${W-14} ${midY})" text-anchor="middle" font-size="11" fill="#64748b">${esc(o.rightTitle)}</text>`;
-  rows.forEach((r,i)=>{ if(i%2===0||i===n-1){ const c=cx(i), lab=`${r.ym.slice(2,4)}/${r.ym.slice(4)}`;
-    g+=`<text x="${c.toFixed(1)}" y="${(y1+13).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b" transform="rotate(-60 ${c.toFixed(1)} ${(y1+13).toFixed(1)})">${lab}</text>`; }});
+  g+=xMonthTicks_(rows,cx,y1);
   g+=`<line x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}" stroke="#cbd5e1"/>`;
   return {frame:g, yL, yR, cx, x0, x1, y1, yz:yL(0), bw, W, H, n};
 }
@@ -575,6 +581,40 @@ function ytdBars_(all, series, title){
   const label=`${fy}年度 4月〜${last.slice(4)}月`;
   g+=`<text x="${((x0+x1)/2).toFixed(1)}" y="${(y1+30).toFixed(1)}" text-anchor="middle" font-size="9.5" fill="#94a3b8">${esc(label)}</text>`;
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img"><text x="${x0}" y="8" font-size="10" fill="#64748b">${esc(title||"累計")}</text>${g}</svg>`;
+}
+/* ── 年度累計 予算対比: 灰=予算累計・実績=達成1.0/未達0.4（原本 chart_budget_vs_actual_ytd 準拠・2026-07-29 PO指摘の移植漏れ対応） ──
+   実績・予算とも「当年度内で予算が入っている月」だけで合算し、月集合を揃えてミスリードを防ぐ */
+function ytdBudgetBars_(all){
+  if(!all.length) return "";
+  const last=all[all.length-1].ym, y=+last.slice(0,4), m=+last.slice(4), fy=(m>=4?y:y-1);
+  const cur=all.filter(r=>r.ym>=`${fy}04` && r.ym<=last && ((r.budget_sales||0)>0||(r.budget_gross_profit||0)>0));
+  if(!cur.length) return "";
+  const sum=k=>cur.reduce((s,r)=>s+(r[k]||0),0);
+  const items=[
+    {name:"売上", fill:"#1f77b4", v:sum("sales"),        bud:sum("budget_sales")},
+    {name:"粗利", fill:"#ff7f0e", v:sum("gross_profit"), bud:sum("budget_gross_profit")}
+  ];
+  let mx=0; items.forEach(it=>{ mx=Math.max(mx,it.v,it.bud); });
+  const W=260,H=430,mL=52,mR=8,mT=10,mB=58,x0=mL,x1=W-mR,y0=mT,y1=H-mB,ph=y1-y0,pw=x1-x0;
+  const MX=mx>0?niceMax(mx):1, yL=v=>y1-(v/MX)*ph;
+  let g=""; const T=4;
+  for(let t=0;t<=T;t++){ const val=MX*t/T, yy=yL(val);
+    g+=`<line x1="${x0}" y1="${yy.toFixed(1)}" x2="${x1}" y2="${yy.toFixed(1)}" stroke="#eef2f7"/>`+
+       `<text x="${x0-5}" y="${(yy+3).toFixed(1)}" text-anchor="end" font-size="9" fill="#94a3b8">${fmtK(val)}</text>`; }
+  const slot=pw/items.length;
+  items.forEach((it,i)=>{
+    const c=x0+slot*(i+0.5), w=Math.max(8,slot*0.34), gw=Math.max(5,slot*0.22), dx=slot*0.13;
+    const bar=(x,bw2,v,fill,op,tip)=>{ const yv=yL(v), h=Math.max(0.5,y1-yv);
+      return `<rect x="${x.toFixed(1)}" y="${yv.toFixed(1)}" width="${bw2.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" opacity="${op}"><title>${tip}</title></rect>`; };
+    if(it.bud>0) g+=bar(c-dx-gw/2, gw, it.bud, "#c0c0c0", 0.55, `予算累計 ${it.name} ${fmtK(it.bud)}`);
+    const ok=(it.bud<=0)||it.v>=it.bud;
+    g+=bar(c+dx-w/2, w, it.v, it.fill, (ok?1:0.4), `実績累計 ${it.name} ${fmtK(it.v)}${it.bud>0?`（予算 ${fmtK(it.bud)}・達成率 ${(it.v/it.bud*100).toFixed(1)}%）`:""}`);
+    g+=`<text x="${c.toFixed(1)}" y="${(y1+14).toFixed(1)}" text-anchor="middle" font-size="9" fill="#64748b">${esc(it.name)}</text>`;
+  });
+  g+=`<line x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}" stroke="#cbd5e1"/>`;
+  const label=`${fy}年度 ${+cur[0].ym.slice(4)}月〜${+cur[cur.length-1].ym.slice(4)}月`;
+  g+=`<text x="${((x0+x1)/2).toFixed(1)}" y="${(y1+30).toFixed(1)}" text-anchor="middle" font-size="9.5" fill="#94a3b8">${esc(label)}</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img"><text x="${x0}" y="8" font-size="10" fill="#64748b">年度累計 予算対比</text>${g}</svg>`;
 }
 /** 本体チャート＋右横の累計チャートを横並びに（原本 columns([5,1]) 相当） */
 function withYtd_(mainSvg, ytdSvg){
@@ -651,8 +691,7 @@ function chartBaseSigned_(rows, vals, leftTitle){
   for(let t=0;t<=T;t++){ const val=mn+(mx-mn)*t/T,y=yL(val);
     g+=`<line x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}" stroke="${Math.abs(val)<1e-9?'#cbd5e1':'#eef2f7'}"/><text x="${x0-6}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="10" fill="#94a3b8">${fmtK(val)}</text>`; }
   g+=`<text x="16" y="${(y0+ph/2).toFixed(1)}" transform="rotate(-90 16 ${(y0+ph/2).toFixed(1)})" text-anchor="middle" font-size="11" fill="#64748b">${esc(leftTitle||"金額(千円)")}</text>`;
-  rows.forEach((r,i)=>{ if(i%2===0||i===n-1){ const c=cx(i);
-    g+=`<text x="${c.toFixed(1)}" y="${(y1+13).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b" transform="rotate(-60 ${c.toFixed(1)} ${(y1+13).toFixed(1)})">${r.ym.slice(2,4)}/${r.ym.slice(4)}</text>`; }});
+  g+=xMonthTicks_(rows,cx,y1);
   return {frame:g, yL, cx, x0, x1, y1, yz, bw, W, H, n};
 }
 /* YoY共通: 前年ゴースト＋当年（改善=不透明/悪化=淡）の棒。配置は yoyGeom_（原本 charts.py 準拠）に一本化。
@@ -754,7 +793,7 @@ function svgCostBreakdown_(rows){
     });
   });
   g+=`<text x="16" y="${(y0+ph/2).toFixed(1)}" transform="rotate(-90 16 ${(y0+ph/2).toFixed(1)})" text-anchor="middle" font-size="11" fill="#64748b">金額(千円)</text>`;
-  rows.forEach((r,i)=>{ if(i%2===0||i===n-1){ const c=cx(i); g+=`<text x="${c.toFixed(1)}" y="${(y1+13).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b" transform="rotate(-60 ${c.toFixed(1)} ${(y1+13).toFixed(1)})">${r.ym.slice(2,4)}/${r.ym.slice(4)}</text>`; }});
+  g+=xMonthTicks_(rows,cx,y1);
   return legendSvg_(comps.map(cp=>[cp[2],cp[1]]),x0,W)+`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img">${g}</svg>`;
 }
 function svgProfit_(rows, dept, yoy){
@@ -788,7 +827,7 @@ function svgProfit_(rows, dept, yoy){
     });
   }
   g+=`<text x="16" y="${(y0+ph/2).toFixed(1)}" transform="rotate(-90 16 ${(y0+ph/2).toFixed(1)})" text-anchor="middle" font-size="11" fill="#64748b">金額(千円)</text>`;
-  rows.forEach((r,i)=>{ if(i%2===0||i===n-1){ const c=cx(i); g+=`<text x="${c.toFixed(1)}" y="${(y1+13).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b" transform="rotate(-60 ${c.toFixed(1)} ${(y1+13).toFixed(1)})">${r.ym.slice(2,4)}/${r.ym.slice(4)}</text>`; }});
+  g+=xMonthTicks_(rows,cx,y1);
   let leg=deptLevel?[["#1f77b4","貢献利益(配賦前)"],["#17becf","貢献利益(配賦後)"]]
                    :(yoy?[["#ff7f0e","営業利益"]]:[["#ff7f0e","営業利益(黒字)"],["#1f77b4","営業利益(赤字)"]]);
   if(yoy) leg=leg.concat([[YOY_GHOST,"前年"]]);

@@ -105,7 +105,7 @@
 <body>
 <header>
   <span class="logo">AC</span>
-  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-29d</span></h1></div>
+  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-29e</span></h1></div>
   <span class="user" id="user"></span>
   <button class="btn ghelp" onclick="openGuide()" title="このシステムの使い方">📖 ご利用ガイド</button>
 </header>
@@ -515,6 +515,8 @@ async function runBudget_(){
   const rows=all.slice(-12);
   w.innerHTML=card_("予算対比（実績 vs 予算）", `直近${rows.length}ヶ月・灰=予算／実績=達成100%・未達40%／折線=粗利率差pt（右軸・緑=改善/赤=悪化）／右=年度累計（実績 vs 予算）`, withYtd_(svgBudget_(rows), ytdBudgetBars_(all)));
 }
+/* 率プロットの当たり判定拡大: 小さな可視点の上に透明ヒット円(title持ち)を重ねる（PO指摘 2026-07-29: 率のツールチップが実用上出ない） */
+function ptHit_(cx,cy,tip,r){ return `<circle cx="${cx}" cy="${cy}" r="${r||9}" fill="transparent" pointer-events="all"><title>${tip}</title></circle>`; }
 /* 横軸の年月ラベル: 月は毎月表示・年（YY/）は先頭と1月のみ付す（PO要望 2026-07-29） */
 function xMonthTicks_(rows, cx, y1){
   let g="";
@@ -627,8 +629,9 @@ function ytdBars_(all, series, title, rates){
       g+=`<line x1="${x0}" y1="${zy.toFixed(1)}" x2="${x1}" y2="${zy.toFixed(1)}" stroke="#0f172a" stroke-dasharray="4 4" opacity="0.55"/>`;
       [mxp,0,-mxp].forEach(v=>{ g+=`<text x="${x1+3}" y="${(yP(v)+3).toFixed(1)}" font-size="8" fill="#94a3b8">${v===0?"0":(v>0?"+":"−")+Math.abs(v).toFixed(1)}</text>`; });
       pts.forEach((p,i)=>{
-        const px=x0+pw*(pts.length>1?(0.25+0.5*i/(pts.length-1)):0.5);
-        g+=`<circle cx="${px.toFixed(1)}" cy="${yP(p.pt).toFixed(1)}" r="5" fill="${p.pt>=0?"#15803d":"#dc2626"}" stroke="${p.edge}" stroke-width="2"><title>累計${p.name} ${p.pt>=0?"改善":"悪化"} ${(p.pt>=0?"+":"")+p.pt.toFixed(2)}pt（当年 ${(p.cr*100).toFixed(2)}%・前年 ${(p.pr*100).toFixed(2)}%）</title></circle>`;
+        const px=(x0+pw*(pts.length>1?(0.25+0.5*i/(pts.length-1)):0.5)).toFixed(1), py=yP(p.pt).toFixed(1);
+        const tip=`累計${p.name} ${p.pt>=0?"改善":"悪化"} ${(p.pt>=0?"+":"")+p.pt.toFixed(2)}pt（当年 ${(p.cr*100).toFixed(2)}%・前年 ${(p.pr*100).toFixed(2)}%）`;
+        g+=`<circle cx="${px}" cy="${py}" r="5" fill="${p.pt>=0?"#15803d":"#dc2626"}" stroke="${p.edge}" stroke-width="2"/>`+ptHit_(px,py,tip,16);
       });
     }
   }
@@ -677,7 +680,8 @@ function ytdBudgetBars_(all){
     const yP=v=>y0+ph/2-(v/mxp)*(ph/2), zy=yP(0);
     g+=`<line x1="${x0}" y1="${zy.toFixed(1)}" x2="${x1}" y2="${zy.toFixed(1)}" stroke="#0f172a" stroke-dasharray="4 4" opacity="0.55"/>`;
     [mxp,0,-mxp].forEach(v=>{ g+=`<text x="${x1+3}" y="${(yP(v)+3).toFixed(1)}" font-size="8" fill="#94a3b8">${v===0?"0":(v>0?"+":"−")+Math.abs(v).toFixed(1)}</text>`; });
-    g+=`<circle cx="${(x0+pw*0.5).toFixed(1)}" cy="${yP(pt).toFixed(1)}" r="5" fill="${pt>=0?"#15803d":"#dc2626"}" stroke="#d62728" stroke-width="2"><title>累計粗利率差 ${(pt>=0?"+":"")+pt.toFixed(2)}pt（実績 ${(cr*100).toFixed(2)}%・予算 ${(br*100).toFixed(2)}%）</title></circle>`;
+    const rpx=(x0+pw*0.5).toFixed(1), rpy=yP(pt).toFixed(1), rtip=`累計粗利率差 ${(pt>=0?"+":"")+pt.toFixed(2)}pt（実績 ${(cr*100).toFixed(2)}%・予算 ${(br*100).toFixed(2)}%）`;
+    g+=`<circle cx="${rpx}" cy="${rpy}" r="5" fill="${pt>=0?"#15803d":"#dc2626"}" stroke="#d62728" stroke-width="2"/>`+ptHit_(rpx,rpy,rtip,16);
   }
   g+=`<line x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}" stroke="#cbd5e1"/>`;
   const label=`${fy}年度 ${+cur[0].ym.slice(4)}月〜${+cur[cur.length-1].ym.slice(4)}月`;
@@ -718,7 +722,8 @@ function svgSalesMargin_(rows, yoy){
     const pts=rows.filter(r=>r.prev).map(r=>`${b.cx(rows.indexOf(r)).toFixed(1)},${yPt((r.gross_profit_rate-r.prev.gross_profit_rate)*100).toFixed(1)}`).join(" ");
     if(pts) g+=`<polyline points="${pts}" fill="none" stroke="${C.rate}" stroke-width="2"/>`;
     rows.forEach((r,i)=>{ if(!r.prev) return; const d=(r.gross_profit_rate-r.prev.gross_profit_rate)*100;
-      g+=`<circle cx="${b.cx(i).toFixed(1)}" cy="${yPt(d).toFixed(1)}" r="4.5" fill="${d>0?"#15803d":"#dc2626"}" stroke="${C.rate}" stroke-width="1.5"><title>${r.ym} 粗利率${d>0?"改善":"悪化"} ${(d>=0?"+":"")+d.toFixed(2)}pt（当年 ${(r.gross_profit_rate*100).toFixed(2)}%・前年 ${(r.prev.gross_profit_rate*100).toFixed(2)}%）</title></circle>`; });
+      const px=b.cx(i).toFixed(1), py=yPt(d).toFixed(1), tip=`${r.ym} 粗利率${d>0?"改善":"悪化"} ${(d>=0?"+":"")+d.toFixed(2)}pt（当年 ${(r.gross_profit_rate*100).toFixed(2)}%・前年 ${(r.prev.gross_profit_rate*100).toFixed(2)}%）`;
+      g+=`<circle cx="${px}" cy="${py}" r="4.5" fill="${d>0?"#15803d":"#dc2626"}" stroke="${C.rate}" stroke-width="1.5"/>`+ptHit_(px,py,tip); });
     g+=`<text x="${W-14}" y="${(y0+ph/2).toFixed(1)}" transform="rotate(90 ${W-14} ${(y0+ph/2).toFixed(1)})" text-anchor="middle" font-size="11" fill="#64748b">粗利率改善 (pt)</text>`;
     const leg=[[C.sales,"売上"],[C.gp,"粗利"],[YOY_GHOST,"前年"],["green","粗利率改善(右軸)"],["red","粗利率悪化"]];
     return legendSvg_(leg,b.x0,b.W)+svgWrap_(b,g);
@@ -734,7 +739,8 @@ function svgSalesMargin_(rows, yoy){
   });
   const pts=rows.map((r,i)=>`${b.cx(i).toFixed(1)},${b.yR(r.gross_profit_rate).toFixed(1)}`).join(" ");
   g+=`<polyline points="${pts}" fill="none" stroke="${C.rate}" stroke-width="2.5"/>`;
-  rows.forEach((r,i)=>{ g+=`<circle cx="${b.cx(i).toFixed(1)}" cy="${b.yR(r.gross_profit_rate).toFixed(1)}" r="3" fill="${C.rate}"><title>${r.ym} 粗利率 ${(r.gross_profit_rate*100).toFixed(1)}%</title></circle>`; });
+  rows.forEach((r,i)=>{ const px=b.cx(i).toFixed(1), py=b.yR(r.gross_profit_rate).toFixed(1);
+    g+=`<circle cx="${px}" cy="${py}" r="3" fill="${C.rate}"/>`+ptHit_(px,py,`${r.ym} 粗利率 ${(r.gross_profit_rate*100).toFixed(2)}%`); });
   return legendSvg_([[C.sales,"売上"],[C.gp,"粗利"],[C.rate,"粗利率(右軸)"]],b.x0,b.W)+svgWrap_(b,g);
 }
 function svgLoss_(rows, yoy){
@@ -748,8 +754,8 @@ function svgLoss_(rows, yoy){
     g+=`<rect x="${x.toFixed(1)}" y="${yW.toFixed(1)}" width="${w.toFixed(1)}" height="${(b.y1-yW).toFixed(1)}" fill="${C.waste}" opacity="0.85"><title>${r.ym} 廃棄額 ${fmtK(wa)}</title></rect>`;
     g+=`<rect x="${x.toFixed(1)}" y="${yD.toFixed(1)}" width="${w.toFixed(1)}" height="${(yW-yD).toFixed(1)}" fill="${C.disc}" opacity="0.85"><title>${r.ym} 値引額 ${fmtK(di)}</title></rect>`;
   });
-  const line=(fn,col)=>{ const pts=rows.map((r,i)=>`${b.cx(i).toFixed(1)},${b.yR(fn(r)).toFixed(1)}`).join(" "); let s=`<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" opacity="0.85"/>`; rows.forEach((r,i)=>{ s+=`<circle cx="${b.cx(i).toFixed(1)}" cy="${b.yR(fn(r)).toFixed(1)}" r="2.5" fill="${col}"/>`; }); return s; };
-  g+=line(r=>r.waste_rate||0,C.waste)+line(r=>r.discount_rate||0,C.disc)+line(r=>(r.waste_rate||0)+(r.discount_rate||0),C.loss);
+  const line=(fn,col,label)=>{ const pts=rows.map((r,i)=>`${b.cx(i).toFixed(1)},${b.yR(fn(r)).toFixed(1)}`).join(" "); let s=`<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" opacity="0.85"/>`; rows.forEach((r,i)=>{ const v=fn(r), px=b.cx(i).toFixed(1), py=b.yR(v).toFixed(1); s+=`<circle cx="${px}" cy="${py}" r="2.5" fill="${col}"/>`+ptHit_(px,py,`${r.ym} ${label} ${(v*100).toFixed(2)}%`,8); }); return s; };
+  g+=line(r=>r.waste_rate||0,C.waste,"廃棄率")+line(r=>r.discount_rate||0,C.disc,"値引率")+line(r=>(r.waste_rate||0)+(r.discount_rate||0),C.loss,"ロス率(計)");
   return legendSvg_([[C.waste,"廃棄"],[C.disc,"値引"],[C.loss,"ロス率(計)"]],b.x0,b.W)+svgWrap_(b,g);
 }
 /* 符号付き軸の枠（実データは減価償却の戻し等で負値が入る。0線を基準に上下へ描く） */
@@ -796,7 +802,9 @@ function svgLossYoY_(rows, C){
   g+=`<line x1="${b.x0}" y1="${zero.toFixed(1)}" x2="${b.x1}" y2="${zero.toFixed(1)}" stroke="#94a3b8" stroke-dasharray="4 4"/>`;
   const ptLine=(fn,col,label,rk)=>{ const pts=rows.map((r,i)=>r.prev?`${b.cx(i).toFixed(1)},${yPt(fn(r)).toFixed(1)}`:null).filter(Boolean).join(" ");
     let s=`<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" opacity="0.8"/>`;
-    rows.forEach((r,i)=>{ if(!r.prev)return; const v=fn(r); s+=`<circle cx="${b.cx(i).toFixed(1)}" cy="${yPt(v).toFixed(1)}" r="3.5" fill="${v>0?'#15803d':'#dc2626'}" stroke="${col}" stroke-width="1.5"><title>${r.ym} ${label}${v>0?"改善":"悪化"} ${(v>=0?"+":"")+v.toFixed(2)}pt（当年 ${((r[rk]||0)*100).toFixed(2)}%・前年 ${((r.prev[rk]||0)*100).toFixed(2)}%）</title></circle>`; });
+    rows.forEach((r,i)=>{ if(!r.prev)return; const v=fn(r), px=b.cx(i).toFixed(1), py=yPt(v).toFixed(1);
+      const tip=`${r.ym} ${label}${v>0?"改善":"悪化"} ${(v>=0?"+":"")+v.toFixed(2)}pt（当年 ${((r[rk]||0)*100).toFixed(2)}%・前年 ${((r.prev[rk]||0)*100).toFixed(2)}%）`;
+      s+=`<circle cx="${px}" cy="${py}" r="3.5" fill="${v>0?'#15803d':'#dc2626'}" stroke="${col}" stroke-width="1.5"/>`+ptHit_(px,py,tip,8); });
     return s; };
   g+=ptLine(r=>((r.prev.waste_rate||0)-(r.waste_rate||0))*100, C.waste, "廃棄率", "waste_rate");
   g+=ptLine(r=>((r.prev.discount_rate||0)-(r.discount_rate||0))*100, C.disc, "値引率", "discount_rate");
@@ -843,7 +851,8 @@ function svgBudget_(rows){
   const pts=rows.map((r,i)=>`${b.cx(i).toFixed(1)},${yPt(((r.gross_profit_rate||0)-(r.budget_gross_profit_rate||0))*100).toFixed(1)}`).join(" ");
   g+=`<polyline points="${pts}" fill="none" stroke="#64748b" stroke-width="2" opacity="0.85"/>`;
   rows.forEach((r,i)=>{ const v=((r.gross_profit_rate||0)-(r.budget_gross_profit_rate||0))*100;
-    g+=`<circle cx="${b.cx(i).toFixed(1)}" cy="${yPt(v).toFixed(1)}" r="3.5" fill="${v>=0?'#15803d':'#dc2626'}" stroke="#d62728" stroke-width="1.5"><title>${r.ym} 粗利率差 ${(v>=0?"+":"")+v.toFixed(2)}pt（実績 ${((r.gross_profit_rate||0)*100).toFixed(2)}%・予算 ${((r.budget_gross_profit_rate||0)*100).toFixed(2)}%）</title></circle>`; });
+    const px=b.cx(i).toFixed(1), py=yPt(v).toFixed(1), tip=`${r.ym} 粗利率差 ${(v>=0?"+":"")+v.toFixed(2)}pt（実績 ${((r.gross_profit_rate||0)*100).toFixed(2)}%・予算 ${((r.budget_gross_profit_rate||0)*100).toFixed(2)}%）`;
+    g+=`<circle cx="${px}" cy="${py}" r="3.5" fill="${v>=0?'#15803d':'#dc2626'}" stroke="#d62728" stroke-width="1.5"/>`+ptHit_(px,py,tip); });
   return legendSvg_([[C.sales,"売上実績"],[C.gp,"粗利実績"],["#c0c0c0","予算"],["#15803d","粗利率差(＋改善)"]],b.x0,b.W)+svgWrap_(b,g);
 }
 function svgCostBreakdown_(rows){

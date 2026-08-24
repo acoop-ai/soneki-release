@@ -105,7 +105,7 @@
 <body>
 <header>
   <span class="logo">AC</span>
-  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-08-24b</span></h1></div>
+  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-08-24c</span></h1></div>
   <span class="user" id="user"></span>
   <button class="btn ghelp" onclick="openGuide()" title="このシステムの使い方">📖 ご利用ガイド</button>
 </header>
@@ -194,7 +194,7 @@ async function startDemo_(){ DEMO=true; S.isAdmin=false; $("user").textContent="
 const S={ meta:null,
   view:"wizard",                                 // wizard=入口ウィザード ／ dash=分析画面
   mode:"総合",                                    // 総合 ／ 比較 ／ 予算（3分析モード）
-  sub:"通常",                                     // 通常 ／ 前年対比（総合・比較で有効。窓=24／12+累計）
+  sub:"前年対比",                                 // 通常 ／ 前年対比（総合・比較で有効。窓=24／12+累計）※既定=前年対比（PO指示 2026-08-24）
   area:"", scope:"AREA", dept:"ALL",              // 総合分析・予算対比の対象
   baseYm:"",                                      // 基準月（表示窓の末尾。空=最新月。PO要望 2026-07-29）
   comp:{ kind:"AREAS", area:"", store:"", dept:"ALL", chart:"①" },  // 比較・内訳の条件
@@ -271,7 +271,8 @@ function wizArea_(a){ S.wiz.area=a; S.wiz.store=null; if(S.wiz.kind==="AREA") S.
 function wizStore_(s){ S.wiz.store=s; S.wiz.step=3; renderWizard_(); }
 function wizDept_(d){
   S.area=S.wiz.area; S.scope=(S.wiz.kind==="AREA")?"AREA":S.wiz.store; S.dept=d;
-  S.mode="総合"; S.sub="通常"; renderDash_();
+  // 既定は「総合分析 × 前年対比」（PO指示 2026-08-24）。前年と比べた状態を最初に見せる
+  S.mode="総合"; S.sub="前年対比"; renderDash_();
 }
 function reopenWizard_(){ S.wiz={ step:1, kind:null, area:null, store:null }; renderWizard_(); }
 
@@ -323,7 +324,9 @@ function renderDash_(){
     `<div id="chartwrap"><div class="note">読み込み中…</div></div>`;
   runMode_();
 }
-function onMode(v){ S.mode=v; if(v==="予算") S.sub="通常"; renderDash_(); }
+/* 予算対比は通常/前年対比の区別を持たないが、S.sub を書き換えると総合へ戻った時に選択が失われる。
+   → 予算モードでは S.sub を触らず保持する（描画側は S.mode で分岐しており影響なし） */
+function onMode(v){ S.mode=v; renderDash_(); }
 function onSub(v){ S.sub=v; renderDash_(); }
 function onBaseYm(v){ S.baseYm=v; renderDash_(); }
 function onArea(v){ S.area=v; const sts=storesOfArea_(v); if(S.scope!=="AREA"&&!sts.some(s=>s.slug===S.scope)) S.scope="AREA"; renderDash_(); }

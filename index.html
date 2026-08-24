@@ -105,7 +105,7 @@
 <body>
 <header>
   <span class="logo">AC</span>
-  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-07-29e</span></h1></div>
+  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-08-24a</span></h1></div>
   <span class="user" id="user"></span>
   <button class="btn ghelp" onclick="openGuide()" title="このシステムの使い方">📖 ご利用ガイド</button>
 </header>
@@ -402,22 +402,22 @@ function renderDeepCharts_(){
   const ytd=(series,title,rates)=>yoy?ytdBars_(all,series,title,rates):"";
   let html=
     card_("① 売上・粗利・粗利率", `直近${dispN}ヶ月・金額=千円${yoy?"／右軸=粗利率改善pt（緑=改善・赤=悪化）":""}`,
-      withYtd_(svgSalesMargin_(rows,yoy), ytd([{key:"sales",name:"売上",fill:"#1f77b4"},{key:"gross_profit",name:"粗利",fill:"#ff7f0e"}],"累計（年度）",YTD_RATES["①"])))+
+      withYtd_(svgSalesMargin_(rows,yoy), ytd([{key:"sales",name:"売上",fill:"#1f77b4"},{key:"gross_profit",name:"粗利",fill:"#ff7f0e"}],"年度 月平均",YTD_RATES["①"])))+
     card_("② ロス管理（廃棄・値引）", yoy?sub("廃棄・値引を前年と対比（減っていれば改善）"):`積み上げ棒＝金額／折線＝率（右軸）`,
-      withYtd_(svgLoss_(rows,yoy), ytd([{key:"waste_amount",name:"廃棄",fill:"#d62728",lowerBetter:true},{key:"discount_amount",name:"値引",fill:"#C71585",lowerBetter:true}],"累計（年度）",YTD_RATES["②"])));
+      withYtd_(svgLoss_(rows,yoy), ytd([{key:"waste_amount",name:"廃棄",fill:"#d62728",lowerBetter:true},{key:"discount_amount",name:"値引",fill:"#C71585",lowerBetter:true}],"年度 月平均",YTD_RATES["②"])));
   if(yoy){
     svgCostYoY6_(rows).forEach(c=>{ html+=card_(c.title, sub("費用は減っていれば改善"),
-      withYtd_(c.svg, ytdBars_(all,[{key:c.key,name:c.label,fill:c.color,lowerBetter:true}],"累計（年度）"))); });
+      withYtd_(c.svg, ytdBars_(all,[{key:c.key,name:c.label,fill:c.color,lowerBetter:true}],"年度 月平均"))); });
   } else html+=card_("③ 経費構造推移（販管費内訳）", `積み上げ棒・金額=千円`, svgCostBreakdown_(rows));
   // ④は原本準拠で2枚: ④-1 営業利益（常時）／④-2 部門貢献利益（部門を選んでいるときだけ追加）
   html+=card_("④-1 営業利益", sub(S.dept==="ALL"?"営業利益（黒字=橙・赤字=青）":"この部門の営業利益"),
-    withYtd_(svgProfit_(rows,"ALL",yoy), ytd([{key:"operating_profit",name:"営業利益",fill:"#ff7f0e"}],"累計（年度）")));
+    withYtd_(svgProfit_(rows,"ALL",yoy), ytd([{key:"operating_profit",name:"営業利益",fill:"#ff7f0e"}],"年度 月平均")));
   if(isDept){
     html+=card_("④-2 部門貢献利益", sub("配賦前（青） vs 配賦後（水色）"),
-      withYtd_(svgProfit_(rows,S.dept,yoy), ytd([{key:"cont_profit_pre",name:"配賦前",fill:"#1f77b4"},{key:"cont_profit_post",name:"配賦後",fill:"#17becf"}],"累計（年度）")));
+      withYtd_(svgProfit_(rows,S.dept,yoy), ytd([{key:"cont_profit_pre",name:"配賦前",fill:"#1f77b4"},{key:"cont_profit_post",name:"配賦後",fill:"#17becf"}],"年度 月平均")));
   }
   html+=card_("⑤ 労働生産性", sub("人時売上（青）・人時生産性（緑）・円/人時"),
-    withYtd_(svgProductivity_(rows,yoy), ytd([{key:"sales_per_man_hour",name:"人時売上",fill:"#1f77b4"},{key:"productivity_per_man_hour",name:"人時生産性",fill:"#2ca02c"}],"累計（年度）")));
+    withYtd_(svgProductivity_(rows,yoy), ytd([{key:"sales_per_man_hour",name:"人時売上",fill:"#1f77b4"},{key:"productivity_per_man_hour",name:"人時生産性",fill:"#2ca02c"}],"年度 月平均")));
   w.innerHTML=html;
 }
 
@@ -489,7 +489,7 @@ async function runComp_(){
     const rows=windowRows_(x.s.months,yoy);
     if(!rows.length) continue;
     // 前年対比は総合分析と同じく右横に累計(YTD)を併記（基準月時点で締める）
-    const ytdSvg=yoy?ytdBars_(baseAll_(x.s.months||[]), ytdSeriesFor_(c.chart), "累計（年度）", ytdRatesFor_(c.chart)):"";
+    const ytdSvg=yoy?ytdBars_(baseAll_(x.s.months||[]), ytdSeriesFor_(c.chart), "年度 月平均", ytdRatesFor_(c.chart)):"";
     cards.push(card_(esc(x.t.label), `${esc(compChartLabel_())}・${yoy?"前年対比"+rows.length+"ヶ月":"直近"+rows.length+"ヶ月"}`, withYtd_(chartFor_(c.chart,rows,yoy,x.t.dept), ytdSvg)));
   }
   renderScopeChips_();
@@ -582,7 +582,8 @@ function yoyBars_(b, i, vals){
   });
   return g;
 }
-/* ── 累計（年度）: 各チャートの右横に置く細い「棒」チャート（原本は columns([5,1]) の側チャート） ──
+/* ── 年度 月平均: 各チャートの右横に置く細い「棒」チャート（原本は columns([5,1]) の側チャート） ──
+   2026-08-24 PO指示で「累計の合算」→【月平均】表示へ変更（4〜7月なら4ヶ月の平均）。ツールチップは月平均と合計を併記。
    系列ごとに 前年=灰の細棒＋当年=色棒 を並べる。線グラフではない。 */
 function ytdBars_(all, series, title, rates){
   if(!all.length) return "";
@@ -591,8 +592,16 @@ function ytdBars_(all, series, title, rates){
   const prev=all.filter(r=>r.ym>=`${fy-1}04` && r.ym<=`${y-1}${last.slice(4)}`);
   if(!cur.length) return `<div class="note">当年度の累計データがありません。</div>`;
   const sum=(arr,k)=>Array.isArray(k)?k.reduce((s,kk)=>s+arr.reduce((a,r)=>a+(r[kk]||0),0),0):arr.reduce((s,r)=>s+(r[k]||0),0);
-  const items=series.map(s=>({ name:s.name, fill:s.fill, lowerBetter:!!s.lowerBetter,
-    v:sum(cur,s.key), prev:prev.length?sum(prev,s.key):null }));
+  // 2026-08-24 PO指示: 金額の目盛りは「累計の合算」ではなく【月平均】で表示する（4〜7月なら4ヶ月の平均）。
+  //   当年・前年それぞれ自分の月数で割る（月数が食い違う期間でも比較が成立する）。
+  //   ※率pt（改善pt）は合計から算出する指標のため平均化しない（下の hasRates ブロックは従来どおり）
+  const nCur=cur.length, nPrev=prev.length;
+  const items=series.map(s=>{
+    const tv=sum(cur,s.key), tp=nPrev?sum(prev,s.key):null;
+    return { name:s.name, fill:s.fill, lowerBetter:!!s.lowerBetter,
+      v:(nCur?tv/nCur:0), prev:(tp!=null&&nPrev)?tp/nPrev:null,   // 表示・目盛りは月平均
+      total:tv, totalPrev:tp };                                    // ツールチップ用に合計も保持
+  });
   let mx=0,mn=0; items.forEach(it=>{ mx=Math.max(mx,it.v,it.prev||0); mn=Math.min(mn,it.v,it.prev||0); });
   const hasRates=!!(rates&&rates.length&&prev.length);
   const W=260,H=430,mL=52,mR=hasRates?34:8,mT=10,mB=58,x0=mL,x1=W-mR,y0=mT,y1=H-mB,ph=y1-y0,pw=x1-x0;
@@ -607,11 +616,15 @@ function ytdBars_(all, series, title, rates){
     const c=x0+slot*(i+0.5), w=Math.max(8,slot*0.34), gw=Math.max(5,slot*0.22), dx=slot*0.13;
     const bar=(x,bw2,v,fill,op,tip)=>{ const yv=yL(v), top=Math.min(yv,yz), h=Math.max(0.5,Math.abs(yz-yv));
       return `<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${bw2.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" opacity="${op}"><title>${tip}</title></rect>`; };
-    if(it.prev!=null) g+=bar(c-dx-gw/2, gw, it.prev, YOY_GHOST, 0.5, `前年累計 ${it.name} ${fmtK(it.prev)}`);
+    // ツールチップは【月平均】と【合計】を併記（PO指示 2026-08-24）。棒の高さ＝月平均
+    if(it.prev!=null) g+=bar(c-dx-gw/2, gw, it.prev, YOY_GHOST, 0.5,
+      `前年 ${it.name}｜月平均 ${fmtK(it.prev)}／合計 ${fmtK(it.totalPrev)}（${nPrev}ヶ月）`);
     const improved = it.prev==null ? true : (it.lowerBetter ? (it.v<it.prev) : (it.v>=it.prev));
     const diff=it.prev!=null?it.v-it.prev:null;
-    const yoyTxt=it.prev!=null?`（前年 ${fmtK(it.prev)}・差 ${(diff>=0?"+":"−")+fmtK(Math.abs(diff))}${it.prev!==0?`・前年比 ${(it.v/it.prev*100).toFixed(1)}%`:""}・${improved?"改善":"悪化"}）`:"";
-    g+=bar(c+dx-w/2, w, it.v, it.fill, (improved?1:0.35), `当年累計 ${it.name} ${fmtK(it.v)}${yoyTxt}`);
+    const yoyTxt=it.prev!=null?`\n前年 月平均 ${fmtK(it.prev)}／合計 ${fmtK(it.totalPrev)}（${nPrev}ヶ月）`+
+      `\n差 ${(diff>=0?"+":"−")+fmtK(Math.abs(diff))}（月平均）${it.prev!==0?`・前年比 ${(it.v/it.prev*100).toFixed(1)}%`:""}・${improved?"改善":"悪化"}`:"";
+    g+=bar(c+dx-w/2, w, it.v, it.fill, (improved?1:0.35),
+      `当年 ${it.name}｜月平均 ${fmtK(it.v)}／合計 ${fmtK(it.total)}（${nCur}ヶ月）${yoyTxt}`);
     g+=`<text x="${c.toFixed(1)}" y="${(y1+14).toFixed(1)}" text-anchor="middle" font-size="9" fill="#64748b">${esc(it.name)}</text>`;
   });
   // 率の累計改善pt（原本 chart_*_ytd 準拠: 塗り=緑改善/赤悪化・縁=当該指標色・右軸=0中央の対称スケール・ゼロ破線）
@@ -636,7 +649,8 @@ function ytdBars_(all, series, title, rates){
     }
   }
   g+=`<line x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}" stroke="#cbd5e1"/>`;
-  const label=`${fy}年度 4月〜${last.slice(4)}月`;
+  // 目盛りが月平均であることを明示（合算と誤解されないように月数も出す）
+  const label=`${fy}年度 4月〜${last.slice(4)}月（${nCur}ヶ月）の月平均`;
   g+=`<text x="${((x0+x1)/2).toFixed(1)}" y="${(y1+30).toFixed(1)}" text-anchor="middle" font-size="9.5" fill="#94a3b8">${esc(label)}</text>`;
   // タイトルは本体の凡例行と同じ高さ(16px)の別svgに出し、チャートsvg同士の縦位置（0線・軸）を揃える
   return `<svg viewBox="0 0 ${W} 14" style="width:100%;height:16px" role="img"><text x="0" y="10" font-size="12" fill="#334155">${esc(title||"累計")}</text></svg>`+
@@ -650,9 +664,14 @@ function ytdBudgetBars_(all){
   const cur=all.filter(r=>r.ym>=`${fy}04` && r.ym<=last && ((r.budget_sales||0)>0||(r.budget_gross_profit||0)>0));
   if(!cur.length) return "";
   const sum=k=>cur.reduce((s,r)=>s+(r[k]||0),0);
+  // 2026-08-24 PO指示: 金額の目盛りは【月平均】表示（実績・予算とも同じ月集合なので同じ月数で割る）
+  //   ※粗利率差ptは合計から算出する指標のため平均化しない（下の as/ag/bs/bg は合計のまま）
+  const nCur=cur.length, avg=k=>nCur?sum(k)/nCur:0;
   const items=[
-    {name:"売上", fill:"#1f77b4", v:sum("sales"),        bud:sum("budget_sales")},
-    {name:"粗利", fill:"#ff7f0e", v:sum("gross_profit"), bud:sum("budget_gross_profit")}
+    {name:"売上", fill:"#1f77b4", v:avg("sales"),        bud:avg("budget_sales"),
+     total:sum("sales"),        totalBud:sum("budget_sales")},
+    {name:"粗利", fill:"#ff7f0e", v:avg("gross_profit"), bud:avg("budget_gross_profit"),
+     total:sum("gross_profit"), totalBud:sum("budget_gross_profit")}
   ];
   let mx=0; items.forEach(it=>{ mx=Math.max(mx,it.v,it.bud); });
   const W=260,H=430,mL=52,mR=34,mT=10,mB=58,x0=mL,x1=W-mR,y0=mT,y1=H-mB,ph=y1-y0,pw=x1-x0;
@@ -666,10 +685,15 @@ function ytdBudgetBars_(all){
     const c=x0+slot*(i+0.5), w=Math.max(8,slot*0.34), gw=Math.max(5,slot*0.22), dx=slot*0.13;
     const bar=(x,bw2,v,fill,op,tip)=>{ const yv=yL(v), h=Math.max(0.5,y1-yv);
       return `<rect x="${x.toFixed(1)}" y="${yv.toFixed(1)}" width="${bw2.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" opacity="${op}"><title>${tip}</title></rect>`; };
-    if(it.bud>0) g+=bar(c-dx-gw/2, gw, it.bud, "#c0c0c0", 0.55, `予算累計 ${it.name} ${fmtK(it.bud)}`);
+    // ツールチップは【月平均】と【合計】を併記（PO指示 2026-08-24）。棒の高さ＝月平均
+    if(it.bud>0) g+=bar(c-dx-gw/2, gw, it.bud, "#c0c0c0", 0.55,
+      `予算 ${it.name}｜月平均 ${fmtK(it.bud)}／合計 ${fmtK(it.totalBud)}（${nCur}ヶ月）`);
     const ok=(it.bud<=0)||it.v>=it.bud;
     const bdiff=it.v-it.bud;
-    g+=bar(c+dx-w/2, w, it.v, it.fill, (ok?1:0.4), `実績累計 ${it.name} ${fmtK(it.v)}${it.bud>0?`（予算 ${fmtK(it.bud)}・差 ${(bdiff>=0?"+":"−")+fmtK(Math.abs(bdiff))}・達成率 ${(it.v/it.bud*100).toFixed(1)}%）`:""}`);
+    g+=bar(c+dx-w/2, w, it.v, it.fill, (ok?1:0.4),
+      `実績 ${it.name}｜月平均 ${fmtK(it.v)}／合計 ${fmtK(it.total)}（${nCur}ヶ月）`+
+      (it.bud>0?`\n予算 月平均 ${fmtK(it.bud)}／合計 ${fmtK(it.totalBud)}`+
+        `\n差 ${(bdiff>=0?"+":"−")+fmtK(Math.abs(bdiff))}（月平均）・達成率 ${(it.v/it.bud*100).toFixed(1)}%`:""));
     g+=`<text x="${c.toFixed(1)}" y="${(y1+14).toFixed(1)}" text-anchor="middle" font-size="9" fill="#64748b">${esc(it.name)}</text>`;
   });
   // 累計粗利率差pt（実績累計粗利率 − 予算累計粗利率。塗り=緑/赤・縁=粗利率色・右軸=0中央の対称スケール）
@@ -684,7 +708,7 @@ function ytdBudgetBars_(all){
     g+=`<circle cx="${rpx}" cy="${rpy}" r="5" fill="${pt>=0?"#15803d":"#dc2626"}" stroke="#d62728" stroke-width="2"/>`+ptHit_(rpx,rpy,rtip,16);
   }
   g+=`<line x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}" stroke="#cbd5e1"/>`;
-  const label=`${fy}年度 ${+cur[0].ym.slice(4)}月〜${+cur[cur.length-1].ym.slice(4)}月`;
+  const label=`${fy}年度 ${+cur[0].ym.slice(4)}月〜${+cur[cur.length-1].ym.slice(4)}月（${nCur}ヶ月）の月平均`;
   g+=`<text x="${((x0+x1)/2).toFixed(1)}" y="${(y1+30).toFixed(1)}" text-anchor="middle" font-size="9.5" fill="#94a3b8">${esc(label)}</text>`;
   // タイトルは本体の凡例行と同じ高さ(16px)の別svgに出し、チャートsvg同士の縦位置（0線・軸）を揃える
   return `<svg viewBox="0 0 ${W} 14" style="width:100%;height:16px" role="img"><text x="0" y="10" font-size="12" fill="#334155">年度累計 予算対比</text></svg>`+

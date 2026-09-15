@@ -28,6 +28,14 @@
   .lb{font-size:11px;color:var(--muted);}
   .note{color:var(--muted);font-size:13px;padding:14px;}
   .err{color:#b91c1c;font-size:13px;padding:14px;border:1px solid #fecaca;border-radius:10px;background:#fef2f2;white-space:pre-wrap;}
+  /* 表示できない時の原因カード（エラーが起きた画面にだけ出す・確認コードで管理者へ連絡できるように） */
+  .alertcard{border:1px solid #fecaca;background:#fef2f2;color:#7f1d1d;border-radius:12px;padding:12px 16px;margin:8px 0;font-size:13px;line-height:1.75;}
+  .alertcard.warn{border-color:#fde68a;background:#fffbeb;color:#78350f;}
+  .alertcard.info{border-color:#bae6fd;background:var(--sky50);color:var(--sky800);}
+  .alertcard .t{display:block;font-size:14px;font-weight:700;margin-bottom:2px;}
+  .alertcard .code{display:inline-block;font-family:Consolas,"Courier New",monospace;font-weight:700;background:#fff;border:1px solid currentColor;border-radius:6px;padding:0 7px;user-select:all;}
+  .alertcard .howto{font-size:12px;margin-top:4px;}
+  .alertcard .btn{margin-top:6px;}
   .card{border:1px solid var(--border);border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.04);padding:22px;max-width:520px;margin:6vh auto 0;text-align:center;}
   .card .cico{font-size:30px;} .card h3{margin:8px 0 4px;font-size:17px;} .card p{color:var(--muted);font-size:13px;margin:6px 0 16px;}
   .roadmap{border:1px solid var(--sky100);background:var(--sky50);border-radius:12px;padding:14px 18px;margin-top:16px;text-align:left;}
@@ -105,7 +113,7 @@
 <body>
 <header>
   <span class="logo">AC</span>
-  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-08-24c</span></h1></div>
+  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-09-14a</span></h1></div>
   <span class="user" id="user"></span>
   <button class="btn ghelp" onclick="openGuide()" title="このシステムの使い方">📖 ご利用ガイド</button>
 </header>
@@ -190,6 +198,69 @@ async function loadJson(name){
 }
 async function startDemo_(){ DEMO=true; S.isAdmin=false; $("user").textContent="デモ表示（サンプルデータ）"; await startApp_(); }
 
+/* ── 表示できない時の原因表示（PO要望 2026-09-14: エラーが起きた画面にだけ、原因と確認コードを出して管理者へ依頼しやすくする） ──
+   E01 取込が止まっている ／ E02 取得に失敗 ／ E03 この範囲のデータが無い ／ E04 前年・基準月のデータが無い
+   E05 店舗の対応づけができない ／ I01 店舗名の変更をつないで表示（お知らせ）
+   材料は変換器が作る meta.stores[]（first/last/depts/renames/issues/hint_prev）と data_check.json。無ければ（旧データ）一般的な文面に留める。 */
+function buildId_(){ const el=document.querySelector("header .sub"); const m=(el&&el.textContent||"").match(/soneki-web-[\w-]+/); return m?m[0]:""; }
+function alertCard_(kind, code, title, cause, extraHtml){
+  const how = kind==="err" ? "この画面のまま（スクリーンショットでも可）、確認コードを添えて管理者へお知らせください。"
+                           : "表示に心当たりがない場合は、確認コードを添えて管理者へお知らせください。";
+  return `<div class="alertcard ${kind==="err"?"":kind}" role="alert"><span class="t">${kind==="info"?"ℹ️":"⚠️"} ${esc(title)}</span>`+
+    `<div>${esc(cause).replace(/\n/g,"<br>")}</div>${extraHtml||""}`+
+    `<div class="howto">確認コード <span class="code">${esc(code)}</span>　${how}</div></div>`;
+}
+function scopeCode_(code, extra){ return [code, aslug_(S.area), S.scope, dslug_(S.dept), S.baseYm, extra].filter(Boolean).join("/")+` (${buildId_()})`; }
+function isNoFile_(e){ return /ファイルなし|未収載/.test(String(e&&e.message||e)); }
+function storeOf_(slug){ return ((S.meta&&S.meta.stores)||[]).find(s=>s.slug===slug)||null; }
+function fmtRange_(a,b){ return (a&&b) ? `${fmtYm_(a)}〜${fmtYm_(b)}` : "不明"; }
+/* E02/E03: データを取りに行って失敗した時。原本に行が無い（扱っていない部門など）は注意、それ以外は要連絡 */
+function loadFailCard_(e, fname){
+  if(!isNoFile_(e)) return alertCard_("err", scopeCode_("E02"), "データを取得できませんでした",
+    `通信またはサーバーの応答で失敗しました。再読み込みしても直らない場合はお知らせください。\n詳細: ${String(e&&e.message||e)}`);
+  const dn=(S.dept==="ALL")?"合計":S.dept;
+  const holder=(S.scope==="AREA") ? (S.meta.areas||[]).find(a=>a.name===S.area) : storeOf_(S.scope);
+  const label=(S.scope==="AREA") ? `${S.area}（エリア合計）` : (holder?holder.store_name:"選んだ店舗");
+  if(S.scope!=="AREA" && !holder)
+    return alertCard_("err", scopeCode_("E03"), "この範囲のデータがありません", "選んだ店舗がデータに登録されていません（店舗の一覧が変わった可能性があります。「最初から選び直す」をお試しください）。");
+  if(holder && holder.depts && S.dept!=="ALL" && holder.depts.indexOf(S.dept)<0)
+    return alertCard_("warn", scopeCode_("E03"), "この範囲のデータがありません",
+      `${label}の原本には「${dn}」の行がありません${holder.first?`（${fmtRange_(holder.first,holder.last)}）`:""}。この部門を扱っていない可能性があります。`);
+  return alertCard_("err", scopeCode_("E03"), "この範囲のデータがありません", `${label}の「${dn}」のデータが見つかりません（${fname}）。`);
+}
+/* E04: 前年同月が無い（新店・閉店・部門の新設など）。前月まで同じ地区にあった店舗を手がかりに添える */
+function noPrevCard_(months){
+  const st=(S.scope==="AREA")?null:storeOf_(S.scope);
+  let cause=`この範囲のデータは ${fmtRange_(months.length?months[0].ym:"", months.length?months[months.length-1].ym:"")} です。前年同月のデータがないため、前年と比べられません（新店・閉店・部門の新設など）。`;
+  if(st && st.hint_prev && st.hint_prev.length) cause+=`\n前月まで同じ地区にあった店舗: ${st.hint_prev.join("、")}。店番と店舗名が同時に変わった場合は、同じ店としてつながりません。`;
+  return alertCard_("warn", scopeCode_("E04"), "前年対比を表示できません", cause, `<button class="btn" onclick="onSub('通常')">「通常」表示に切り替える</button>`);
+}
+function noBaseCard_(months){
+  return alertCard_("warn", scopeCode_("E04"), "この基準月以前のデータがありません",
+    `この範囲のデータは ${fmtRange_(months.length?months[0].ym:"", months.length?months[months.length-1].ym:"")} です。基準月を選び直してください。`,
+    `<button class="btn" onclick="onBaseYm('')">基準月を「最新」に戻す</button>`);
+}
+/* E05／I01: 店舗の対応づけ（変換器が店番・店舗名・地区を照合した結果）。その店舗を見ている画面にだけ出す */
+function storeNotes_(){
+  if(S.scope==="AREA") return "";
+  const st=storeOf_(S.scope); if(!st) return "";
+  let h="";
+  (st.issues||[]).forEach(i=>{ h+=alertCard_("err", scopeCode_(i.code||"E05"), "店舗の対応づけに問題があります", i.text||""); });
+  (st.renames||[]).forEach(r=>{
+    const from=(r.from_area!==r.to_area?r.from_area+" ":"")+r.from_name, to=(r.from_area!==r.to_area?r.to_area+" ":"")+r.to_name;
+    h+=alertCard_("info", scopeCode_("I01", r.month), "店舗名の変更をつないで表示しています",
+      `店番${r.code}の店舗が ${fmtYm_(r.month)} に「${from}」から「${to}」に変わったため、同じ店として履歴をつないでいます。別の店の場合はお知らせください。`);
+  });
+  return h;
+}
+/* E01: 最新の取込が止まっている（data_check.json）。表示中の数字が古いことをすべての分析画面で知らせる */
+function stopBanner_(){
+  const c=S.check; if(!c || c.status!=="stopped") return "";
+  const det=(c.details||[]).slice(0,3).join("\n");
+  return alertCard_("err", ["E01", String(c.checked_at||"").replace(/\D/g,"").slice(0,12)].filter(Boolean).join("/")+` (${buildId_()})`, "最新データの取込が止まっています",
+    `${c.checked_at||""} の取込が止まりました。表示中のデータは ${S.meta.generated_at||"前回の取込"} 時点のものです。\n理由: ${c.reason||"不明"}${det?"\n"+det:""}`);
+}
+
 /* ── 状態 ── */
 const S={ meta:null,
   view:"wizard",                                 // wizard=入口ウィザード ／ dash=分析画面
@@ -227,8 +298,15 @@ async function afterAuth_(){
 
 /* ── アプリ本体 ── */
 async function startApp_(){
+  // 取込の結果（data_check.json）も同時に取りに行く。無い（旧データ・デモ）時は表示しないだけ
+  const chk = loadJson("data_check.json").catch(()=>null);
   try{ S.meta = await loadJson("meta.json"); }
-  catch(e){ $("app").innerHTML=`<div class="err">データ（meta.json）を取得できません：${esc(String(e&&e.message||e))}</div>`; return; }
+  catch(e){
+    $("app").innerHTML=alertCard_("err", `E02/meta (${buildId_()})`, "データを取得できませんでした",
+      `店舗・月の一覧（meta.json）を取得できません。再読み込みしても直らない場合はお知らせください。\n詳細: ${String(e&&e.message||e)}`);
+    return;
+  }
+  S.check = await chk;
   S.area = (S.meta.areas[0]||{}).name || "";
   S.wiz={ step:1, kind:null, area:null, store:null };
   renderWizard_();                                // スコープ先行: 最初に見たい範囲を選んでから表示
@@ -320,6 +398,7 @@ function renderDash_(){
     `<button class="btn" style="margin-left:auto" onclick="reopenWizard_()" title="ウィザードで選び直す">🧭 最初から選び直す</button>`+
     (S.isAdmin?`<button class="admin-btn" onclick="renderDataManage_()" title="Excelの取込（管理者向け）">⚙️ データ管理</button>`:``)+
     `</div>`+
+    `<div id="sysalert">${stopBanner_()}</div>`+
     `<div id="scopechips" class="scopechips"></div>`+
     `<div id="chartwrap"><div class="note">読み込み中…</div></div>`;
   runMode_();
@@ -386,7 +465,7 @@ async function runDeep_(){
   const w=$("chartwrap"); if(w) w.innerHTML=`<div class="note">読み込み中…</div>`;
   const fname=`series/${aslug_(S.area)}__${dslug_(S.dept)}__${S.scope}.json`;
   try{ S.series = await loadJson(fname); }
-  catch(e){ if(w) w.innerHTML=`<div class="note">この範囲のデータがありません（${esc(fname)}）。</div>`; return; }
+  catch(e){ if(w) w.innerHTML=storeNotes_()+loadFailCard_(e, fname); return; }
   renderDeepCharts_();
 }
 function renderDeepCharts_(){
@@ -394,10 +473,10 @@ function renderDeepCharts_(){
   renderScopeChips_();
   const allRaw=S.series.months||[];
   const all=baseAll_(allRaw);   // 累計(YTD)も基準月時点で締める
-  if(!all.length){ w.innerHTML=`<div class="note">この基準月以前のデータがありません。</div>`; return; }
+  if(!all.length){ w.innerHTML=storeNotes_()+noBaseCard_(allRaw); return; }
   const yoy=(S.sub==="前年対比");
   const rows=windowRows_(allRaw,yoy);
-  if(yoy && !rows.length){ w.innerHTML=`<div class="note">前年対比に必要な前年同月データがありません。</div>`; return; }
+  if(yoy && !rows.length){ w.innerHTML=storeNotes_()+noPrevCard_(allRaw); return; }
   const dispN=rows.length;
   const isDept=(S.dept!=="ALL");
   const sub=(t)=>`${t}${yoy?"／前年=灰・改善は濃く/悪化は淡く":""}`;
@@ -421,7 +500,7 @@ function renderDeepCharts_(){
   }
   html+=card_("⑤ 労働生産性", sub("人時売上（青）・人時生産性（緑）・円/人時"),
     withYtd_(svgProductivity_(rows,yoy), ytd([{key:"sales_per_man_hour",name:"人時売上",fill:"#1f77b4"},{key:"productivity_per_man_hour",name:"人時生産性",fill:"#2ca02c"}],"年度 月平均")));
-  w.innerHTML=html;
+  w.innerHTML=storeNotes_()+html;
 }
 
 /* ── 比較・内訳（Comparison: 複数対象×1指標の縦並び） ── */
@@ -485,18 +564,47 @@ async function runComp_(){
   }
   w.innerHTML=`<div class="note">読み込み中…（${targets.length}件）</div>`;
   const yoy=(S.sub==="前年対比");
-  const results=await Promise.all(targets.map(async t=>{ try{ return {t, s:await loadJson(t.file)}; }catch(e){ return {t, s:null}; } }));
-  const cards=[];
+  const results=await Promise.all(targets.map(async t=>{ try{ return {t, s:await loadJson(t.file)}; }catch(e){ return {t, s:null, e}; } }));
+  const cards=[], skipped=[];
   for(const x of results){
-    if(!x.s||!(x.s.months||[]).length) continue;          // 欠測範囲は表示しない（行欠落=可視化なし）
-    const rows=windowRows_(x.s.months,yoy);
-    if(!rows.length) continue;
+    const ms=(x.s&&x.s.months)||[];
+    if(!ms.length){ skipped.push({label:x.t.label, file:x.t.file, e:x.e||"データが空です"}); continue; }   // カードは出さず、下に理由をまとめる
+    const rows=windowRows_(ms,yoy);
+    if(!rows.length){ skipped.push({label:x.t.label, file:x.t.file, noPrev:true, last:ms[ms.length-1].ym, range:fmtRange_(ms[0].ym, ms[ms.length-1].ym)}); continue; }
     // 前年対比は総合分析と同じく右横に累計(YTD)を併記（基準月時点で締める）
     const ytdSvg=yoy?ytdBars_(baseAll_(x.s.months||[]), ytdSeriesFor_(c.chart), "年度 月平均", ytdRatesFor_(c.chart)):"";
     cards.push(card_(esc(x.t.label), `${esc(compChartLabel_())}・${yoy?"前年対比"+rows.length+"ヶ月":"直近"+rows.length+"ヶ月"}`, withYtd_(chartFor_(c.chart,rows,yoy,x.t.dept), ytdSvg)));
   }
   renderScopeChips_();
-  w.innerHTML = cards.length?cards.join(""):`<div class="note">この条件で表示できるデータがありません。</div>`;
+  w.innerHTML = cards.join("") + compSkippedCard_(skipped, yoy, cards.length);
+}
+/* 原本にその部門の行がもともと無い（meta の depts に無い）＝欠けていて正常。ALL は常にあるべきなので対象外 */
+function expectedMissing_(file){
+  const m=String(file).match(/series\/([^_]+)__([^_]+)__(.+)\.json$/); if(!m) return false;
+  const dept=(S.meta.depts||[]).find(d=>d.slug===m[2]); if(!dept) return false;
+  const holder=(m[3]==="AREA") ? (S.meta.areas||[]).find(a=>a.slug===m[1]) : storeOf_(m[3]);
+  return !!(holder && holder.depts && holder.depts.indexOf(dept.name)<0);
+}
+/* 表示期間（前年対比＝基準月から12ヶ月）の最初の月 */
+function winStart_(){
+  const end=S.baseYm||(S.meta.months||[]).slice(-1)[0]||""; if(!end) return "";
+  let y=+end.slice(0,4), m=+end.slice(4)-11; while(m<1){ m+=12; y--; }
+  return `${y}${String(m).padStart(2,"0")}`;
+}
+/* 比較・内訳で表示できなかった対象を、理由つきで1枚にまとめる（取得失敗があれば要連絡、前年が無い・原本に行が無いだけなら注意）。
+   並べて比べる画面（エリア比較・店舗比較）では、表示期間より前に終わった店（閉店など）は選んでいないので載せない */
+function compSkippedCard_(skipped, yoy, nCards){
+  const c=S.comp, ws=winStart_();
+  const list=skipped.filter(s=>!(s.e && isNoFile_(s.e) && expectedMissing_(s.file))
+                            && !(s.noPrev && c.kind!=="STORE_DEPTS" && ws && s.last && s.last<ws));
+  const fail=list.some(s=>s.e && !isNoFile_(s.e)), noPrev=list.some(s=>s.noPrev);
+  const code=k=>[k, "comp", c.kind, aslug_(c.area), c.store, dslug_(c.dept), c.chart].filter(Boolean).join("/")+` (${buildId_()})`;
+  if(!list.length) return nCards ? "" : alertCard_("warn", code("E03"), "この条件で表示できるデータがありません", "選んだ部門の行が、対象の原本にありません。");
+  const lines=list.map(s=> s.noPrev ? `・${s.label}: ${yoy?"前年同月":"基準月以前"}のデータがありません（データは ${s.range}）`
+    : isNoFile_(s.e) ? `・${s.label}: この範囲のデータがありません`
+    : `・${s.label}: 取得に失敗しました（${String(s.e&&s.e.message||s.e)}）`).join("\n");
+  return alertCard_(fail?"err":"warn", code(fail?"E02":(noPrev?"E04":"E03")), `表示できなかった対象があります（${list.length}件）`, lines,
+    (yoy && noPrev) ? `<button class="btn" onclick="onSub('通常')">「通常」表示に切り替える</button>` : "");
 }
 
 /* ── 予算対比（Budget vs Actual: 12ヶ月窓。予算未取込なら案内） ── */
@@ -504,19 +612,19 @@ async function runBudget_(){
   const w=$("chartwrap"); if(w) w.innerHTML=`<div class="note">読み込み中…</div>`;
   const fname=`series/${aslug_(S.area)}__${dslug_(S.dept)}__${S.scope}.json`;
   try{ S.series = await loadJson(fname); }
-  catch(e){ if(w) w.innerHTML=`<div class="note">この範囲のデータがありません（${esc(fname)}）。</div>`; return; }
+  catch(e){ if(w) w.innerHTML=storeNotes_()+loadFailCard_(e, fname); return; }
   renderScopeChips_();
   const all=baseAll_(S.series.months||[]);   // 基準月まで（累計も基準月時点で締める）
   const hasBudget=all.some(r=>(r.budget_sales||0)>0||(r.budget_gross_profit||0)>0);
   if(!hasBudget){
-    w.innerHTML=`<div class="chartcard" style="max-width:720px"><div class="chead"><b>予算対比</b></div>`+
+    w.innerHTML=storeNotes_()+`<div class="chartcard" style="max-width:720px"><div class="chead"><b>予算対比</b></div>`+
       `<div class="note" style="padding:8px 2px">この範囲の<b>予算データが未取込</b>のため、予算対比はまだ表示できません。<br>`+
       `年度予算Excelの取込（⚙️ データ管理 → ② 年度予算Excel）と本部側の処理が完了すると、`+
       `実績vs予算（灰=予算・達成=濃・未達=淡）と粗利率差pt（緑=改善・赤=悪化）をここに表示します。</div></div>`;
     return;
   }
   const rows=all.slice(-12);
-  w.innerHTML=card_("予算対比（実績 vs 予算）", `直近${rows.length}ヶ月・灰=予算／実績=達成100%・未達40%／折線=粗利率差pt（右軸・緑=改善/赤=悪化）／右=年度累計（実績 vs 予算）`, withYtd_(svgBudget_(rows), ytdBudgetBars_(all)));
+  w.innerHTML=storeNotes_()+card_("予算対比（実績 vs 予算）", `直近${rows.length}ヶ月・灰=予算／実績=達成100%・未達40%／折線=粗利率差pt（右軸・緑=改善/赤=悪化）／右=年度累計（実績 vs 予算）`, withYtd_(svgBudget_(rows), ytdBudgetBars_(all)));
 }
 /* 率プロットの当たり判定拡大: 小さな可視点の上に透明ヒット円(title持ち)を重ねる（PO指摘 2026-07-29: 率のツールチップが実用上出ない） */
 function ptHit_(cx,cy,tip,r){ return `<circle cx="${cx}" cy="${cy}" r="${r||9}" fill="transparent" pointer-events="all"><title>${tip}</title></circle>`; }

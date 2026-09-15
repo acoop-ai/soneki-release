@@ -113,7 +113,7 @@
 <body>
 <header>
   <span class="logo">AC</span>
-  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-09-14a</span></h1></div>
+  <div><h1>部門損益 可視化 <span class="sub">DeptProfit・build soneki-web-2026-09-15a</span></h1></div>
   <span class="user" id="user"></span>
   <button class="btn ghelp" onclick="openGuide()" title="このシステムの使い方">📖 ご利用ガイド</button>
 </header>
@@ -210,12 +210,32 @@ function alertCard_(kind, code, title, cause, extraHtml){
     `<div>${esc(cause).replace(/\n/g,"<br>")}</div>${extraHtml||""}`+
     `<div class="howto">確認コード <span class="code">${esc(code)}</span>　${how}</div></div>`;
 }
+/* お知らせ（理由が分かっていて対応が要らないもの）: 確認コードも連絡のお願いも付けない */
+function infoCard_(title, cause, extraHtml){
+  return `<div class="alertcard info" role="note"><span class="t">ℹ️ ${esc(title)}</span><div>${esc(cause).replace(/\n/g,"<br>")}</div>${extraHtml||""}</div>`;
+}
+/* 部門の管理変更（PO決定 2026-09-15）: ベーカリーは 2026年3月から惣菜部門の一部として管理する。ベーカリーだけを確認することはできない。
+   根拠（原本）: ベーカリーの金額があるのは 2025年4月〜2026年2月の6店だけ。2026年3〜4月は行があっても0、5月からは行が無い。
+   ベーカリーだけの前年対比が出ないのは正常なので、警告ではなくお知らせで出す。 */
+const DEPT_ABSORBED={ "ベーカリー":{ into:"惣菜", since:"202603" } };
+function absorbed_(dept){ return (dept && DEPT_ABSORBED[dept]) || null; }
+function absorbedCard_(dept, kind, onDeptFn){
+  const a=absorbed_(dept); if(!a) return "";
+  const y=+a.since.slice(0,4), m=+a.since.slice(4), since=`${y}年${m}月`, last=(m===1)?`${y-1}年12月`:`${y}年${m-1}月`;
+  const title=`${dept}は${since}から${a.into}部門の一部として管理しています`;
+  const goInto=onDeptFn ? ` <button class="btn" onclick="${onDeptFn}('${esc(a.into)}')">「${esc(a.into)}」を見る</button>` : "";
+  if(kind==="yoy") return infoCard_(title, `そのため、${dept}だけの前年対比は表示できません。${dept}だけの数字（${last}まで）は「通常」表示で見られます。`,
+    `<button class="btn" onclick="onSub('通常')">「通常」表示に切り替える</button>${goInto}`);
+  if(kind==="none") return infoCard_(title, `この範囲には${dept}だけの数字がありません。`, goInto);
+  return infoCard_(title, `${dept}だけの数字は${last}までです。${since}からは${a.into}に含まれます。`, "");
+}
 function scopeCode_(code, extra){ return [code, aslug_(S.area), S.scope, dslug_(S.dept), S.baseYm, extra].filter(Boolean).join("/")+` (${buildId_()})`; }
 function isNoFile_(e){ return /ファイルなし|未収載/.test(String(e&&e.message||e)); }
 function storeOf_(slug){ return ((S.meta&&S.meta.stores)||[]).find(s=>s.slug===slug)||null; }
 function fmtRange_(a,b){ return (a&&b) ? `${fmtYm_(a)}〜${fmtYm_(b)}` : "不明"; }
 /* E02/E03: データを取りに行って失敗した時。原本に行が無い（扱っていない部門など）は注意、それ以外は要連絡 */
 function loadFailCard_(e, fname){
+  if(isNoFile_(e) && absorbed_(S.dept)) return absorbedCard_(S.dept, "none", "onDept");
   if(!isNoFile_(e)) return alertCard_("err", scopeCode_("E02"), "データを取得できませんでした",
     `通信またはサーバーの応答で失敗しました。再読み込みしても直らない場合はお知らせください。\n詳細: ${String(e&&e.message||e)}`);
   const dn=(S.dept==="ALL")?"合計":S.dept;
@@ -476,7 +496,8 @@ function renderDeepCharts_(){
   if(!all.length){ w.innerHTML=storeNotes_()+noBaseCard_(allRaw); return; }
   const yoy=(S.sub==="前年対比");
   const rows=windowRows_(allRaw,yoy);
-  if(yoy && !rows.length){ w.innerHTML=storeNotes_()+noPrevCard_(allRaw); return; }
+  // 管理が変わった部門（ベーカリー）は、前年と比べられる月が一部に残っていても前年対比を出さない（金額0の月との比較になるため）
+  if(yoy && (absorbed_(S.dept) || !rows.length)){ w.innerHTML=storeNotes_()+(absorbed_(S.dept)?absorbedCard_(S.dept,"yoy","onDept"):noPrevCard_(allRaw)); return; }
   const dispN=rows.length;
   const isDept=(S.dept!=="ALL");
   const sub=(t)=>`${t}${yoy?"／前年=灰・改善は濃く/悪化は淡く":""}`;
@@ -500,7 +521,7 @@ function renderDeepCharts_(){
   }
   html+=card_("⑤ 労働生産性", sub("人時売上（青）・人時生産性（緑）・円/人時"),
     withYtd_(svgProductivity_(rows,yoy), ytd([{key:"sales_per_man_hour",name:"人時売上",fill:"#1f77b4"},{key:"productivity_per_man_hour",name:"人時生産性",fill:"#2ca02c"}],"年度 月平均")));
-  w.innerHTML=storeNotes_()+html;
+  w.innerHTML=storeNotes_()+absorbedCard_(S.dept,"note","")+html;
 }
 
 /* ── 比較・内訳（Comparison: 複数対象×1指標の縦並び） ── */
@@ -568,15 +589,16 @@ async function runComp_(){
   const cards=[], skipped=[];
   for(const x of results){
     const ms=(x.s&&x.s.months)||[];
-    if(!ms.length){ skipped.push({label:x.t.label, file:x.t.file, e:x.e||"データが空です"}); continue; }   // カードは出さず、下に理由をまとめる
+    if(!ms.length){ skipped.push({label:x.t.label, file:x.t.file, dept:x.t.dept, e:x.e||"データが空です"}); continue; }   // カードは出さず、下に理由をまとめる
     const rows=windowRows_(ms,yoy);
-    if(!rows.length){ skipped.push({label:x.t.label, file:x.t.file, noPrev:true, last:ms[ms.length-1].ym, range:fmtRange_(ms[0].ym, ms[ms.length-1].ym)}); continue; }
+    if(!rows.length || (yoy && absorbed_(x.t.dept))){ skipped.push({label:x.t.label, file:x.t.file, dept:x.t.dept, noPrev:true, last:ms[ms.length-1].ym, range:fmtRange_(ms[0].ym, ms[ms.length-1].ym)}); continue; }
     // 前年対比は総合分析と同じく右横に累計(YTD)を併記（基準月時点で締める）
     const ytdSvg=yoy?ytdBars_(baseAll_(x.s.months||[]), ytdSeriesFor_(c.chart), "年度 月平均", ytdRatesFor_(c.chart)):"";
     cards.push(card_(esc(x.t.label), `${esc(compChartLabel_())}・${yoy?"前年対比"+rows.length+"ヶ月":"直近"+rows.length+"ヶ月"}`, withYtd_(chartFor_(c.chart,rows,yoy,x.t.dept), ytdSvg)));
   }
   renderScopeChips_();
-  w.innerHTML = cards.join("") + compSkippedCard_(skipped, yoy, cards.length);
+  const deptNote=(cards.length && c.kind!=="STORE_DEPTS") ? absorbedCard_(c.dept,"note","") : "";
+  w.innerHTML = deptNote + cards.join("") + compSkippedCard_(skipped, yoy, cards.length);
 }
 /* 原本にその部門の行がもともと無い（meta の depts に無い）＝欠けていて正常。ALL は常にあるべきなので対象外 */
 function expectedMissing_(file){
@@ -595,15 +617,19 @@ function winStart_(){
    並べて比べる画面（エリア比較・店舗比較）では、表示期間より前に終わった店（閉店など）は選んでいないので載せない */
 function compSkippedCard_(skipped, yoy, nCards){
   const c=S.comp, ws=winStart_();
+  // 管理が変わった部門（ベーカリー）は、表示できないのが正常。個別の行に並べず、お知らせ1枚にまとめる
+  const abs=skipped.filter(s=>absorbed_(s.dept) && (s.noPrev || (s.e && isNoFile_(s.e) && !expectedMissing_(s.file))));   // もともと行が無い店は数えない
+  skipped=skipped.filter(s=>abs.indexOf(s)<0);
+  const note=(abs.length && (yoy || !nCards)) ? absorbedCard_(abs[0].dept, yoy?"yoy":"none", c.kind==="STORE_DEPTS"?"":"onCompDept") : "";
   const list=skipped.filter(s=>!(s.e && isNoFile_(s.e) && expectedMissing_(s.file))
                             && !(s.noPrev && c.kind!=="STORE_DEPTS" && ws && s.last && s.last<ws));
   const fail=list.some(s=>s.e && !isNoFile_(s.e)), noPrev=list.some(s=>s.noPrev);
   const code=k=>[k, "comp", c.kind, aslug_(c.area), c.store, dslug_(c.dept), c.chart].filter(Boolean).join("/")+` (${buildId_()})`;
-  if(!list.length) return nCards ? "" : alertCard_("warn", code("E03"), "この条件で表示できるデータがありません", "選んだ部門の行が、対象の原本にありません。");
+  if(!list.length) return note + ((nCards || note) ? "" : alertCard_("warn", code("E03"), "この条件で表示できるデータがありません", "選んだ部門の行が、対象の原本にありません。"));
   const lines=list.map(s=> s.noPrev ? `・${s.label}: ${yoy?"前年同月":"基準月以前"}のデータがありません（データは ${s.range}）`
     : isNoFile_(s.e) ? `・${s.label}: この範囲のデータがありません`
     : `・${s.label}: 取得に失敗しました（${String(s.e&&s.e.message||s.e)}）`).join("\n");
-  return alertCard_(fail?"err":"warn", code(fail?"E02":(noPrev?"E04":"E03")), `表示できなかった対象があります（${list.length}件）`, lines,
+  return note + alertCard_(fail?"err":"warn", code(fail?"E02":(noPrev?"E04":"E03")), `表示できなかった対象があります（${list.length}件）`, lines,
     (yoy && noPrev) ? `<button class="btn" onclick="onSub('通常')">「通常」表示に切り替える</button>` : "");
 }
 
@@ -617,14 +643,14 @@ async function runBudget_(){
   const all=baseAll_(S.series.months||[]);   // 基準月まで（累計も基準月時点で締める）
   const hasBudget=all.some(r=>(r.budget_sales||0)>0||(r.budget_gross_profit||0)>0);
   if(!hasBudget){
-    w.innerHTML=storeNotes_()+`<div class="chartcard" style="max-width:720px"><div class="chead"><b>予算対比</b></div>`+
+    w.innerHTML=storeNotes_()+absorbedCard_(S.dept,"note","")+`<div class="chartcard" style="max-width:720px"><div class="chead"><b>予算対比</b></div>`+
       `<div class="note" style="padding:8px 2px">この範囲の<b>予算データが未取込</b>のため、予算対比はまだ表示できません。<br>`+
       `年度予算Excelの取込（⚙️ データ管理 → ② 年度予算Excel）と本部側の処理が完了すると、`+
       `実績vs予算（灰=予算・達成=濃・未達=淡）と粗利率差pt（緑=改善・赤=悪化）をここに表示します。</div></div>`;
     return;
   }
   const rows=all.slice(-12);
-  w.innerHTML=storeNotes_()+card_("予算対比（実績 vs 予算）", `直近${rows.length}ヶ月・灰=予算／実績=達成100%・未達40%／折線=粗利率差pt（右軸・緑=改善/赤=悪化）／右=年度累計（実績 vs 予算）`, withYtd_(svgBudget_(rows), ytdBudgetBars_(all)));
+  w.innerHTML=storeNotes_()+absorbedCard_(S.dept,"note","")+card_("予算対比（実績 vs 予算）", `直近${rows.length}ヶ月・灰=予算／実績=達成100%・未達40%／折線=粗利率差pt（右軸・緑=改善/赤=悪化）／右=年度累計（実績 vs 予算）`, withYtd_(svgBudget_(rows), ytdBudgetBars_(all)));
 }
 /* 率プロットの当たり判定拡大: 小さな可視点の上に透明ヒット円(title持ち)を重ねる（PO指摘 2026-07-29: 率のツールチップが実用上出ない） */
 function ptHit_(cx,cy,tip,r){ return `<circle cx="${cx}" cy="${cy}" r="${r||9}" fill="transparent" pointer-events="all"><title>${tip}</title></circle>`; }
